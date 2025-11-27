@@ -1,7 +1,7 @@
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 # Konfiguracja logowania
 logging.basicConfig(
@@ -18,7 +18,7 @@ class SentryOneSystem:
             "synergic": {"name": "Synergic", "type": "computer", "status": "offline", "capabilities": []}
         }
     
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def start_command(self, update: Update, context):
         """Komenda /start - inicjalizacja systemu"""
         welcome_text = """
 🤖 **SENTRY ONE SYSTEM AKTYWOWANY**
@@ -31,9 +31,9 @@ Zarejestrowani agenci:
 
 Użyj /register aby aktywować urządzenia!
         """
-        await update.message.reply_text(welcome_text, parse_mode='Markdown')
+        update.message.reply_text(welcome_text, parse_mode='Markdown')
     
-    async def register_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def register_command(self, update: Update, context):
         """Komenda /register - rejestracja urządzenia"""
         keyboard = [
             [InlineKeyboardButton("📱 Echo", callback_data="register_echo")],
@@ -44,15 +44,15 @@ Użyj /register aby aktywować urządzenia!
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
+        update.message.reply_text(
             "Wybierz urządzenie do rejestracji:",
             reply_markup=reply_markup
         )
     
-    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def button_handler(self, update: Update, context):
         """Obsługa przycisków inline"""
         query = update.callback_query
-        await query.answer()
+        query.answer()
         
         agent_id = query.data.replace("register_", "")
         
@@ -60,7 +60,7 @@ Użyj /register aby aktywować urządzenia!
             self.agents[agent_id]["status"] = "online"
             self.agents[agent_id]["capabilities"] = ["monitoring", "communication", "data_analysis"]
             
-            await query.edit_message_text(
+            query.edit_message_text(
                 f"✅ **{self.agents[agent_id]['name']}** został aktywowany!\n"
                 f"Typ: {self.agents[agent_id]['type']}\n"
                 f"Status: {self.agents[agent_id]['status']}\n"
@@ -68,7 +68,7 @@ Użyj /register aby aktywować urządzenia!
                 parse_mode='Markdown'
             )
     
-    async def agents_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def agents_command(self, update: Update, context):
         """Komenda /agents - lista agentów"""
         status_text = "🤖 **AKTYWNI AGENCI:**\n\n"
         
@@ -80,27 +80,27 @@ Użyj /register aby aktywować urządzenia!
                 status_text += f"   Możliwości: {', '.join(agent['capabilities'])}\n"
             status_text += "\n"
         
-        await update.message.reply_text(status_text, parse_mode='Markdown')
+        update.message.reply_text(status_text, parse_mode='Markdown')
     
-    async def handle_agent_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def handle_agent_message(self, update: Update, context):
         """Obsługa wiadomości do agentów"""
         message_text = update.message.text.lower()
         
         # Rozpoznawanie którego agenta wywołano
         if message_text.startswith('echo'):
-            response = await self.handle_echo_command(message_text)
+            response = self.handle_echo_command(message_text)
         elif message_text.startswith('vector'):
-            response = await self.handle_vector_command(message_text)
+            response = self.handle_vector_command(message_text)
         elif message_text.startswith('visor'):
-            response = await self.handle_visor_command(message_text)
+            response = self.handle_visor_command(message_text)
         elif message_text.startswith('synergic'):
-            response = await self.handle_synergic_command(message_text)
+            response = self.handle_synergic_command(message_text)
         else:
             response = "🤖 Sentry One: Nie rozpoznano agenta. Użyj: Echo, Vector, Visor lub Synergic"
         
-        await update.message.reply_text(response)
+        update.message.reply_text(response)
     
-    async def handle_echo_command(self, command: str):
+    def handle_echo_command(self, command: str):
         """Obsługa komend dla Echo (telefon)"""
         if "status" in command:
             return "📱 Echo: Jestem w trakcie konfiguracji. DeepSeek 7B ładuje się na Manjaro ARM..."
@@ -109,15 +109,15 @@ Użyj /register aby aktywować urządzenia!
         else:
             return "📱 Echo: Słucham! Przygotowuję się do obserwacji astronomicznych."
     
-    async def handle_vector_command(self, command: str):
+    def handle_vector_command(self, command: str):
         """Obsługa komend dla Vector (tablet)"""
         return "📟 Vector: Gotowy do działań kreatywnych! Czekam na konfigurację."
     
-    async def handle_visor_command(self, command: str):
+    def handle_visor_command(self, command: str):
         """Obsługa komend dla Visor (oculus)"""
         return "🕶️ Visor: System VR inicjalizowany. Przygotowuję immersyjne doświadczenia!"
     
-    async def handle_synergic_command(self, command: str):
+    def handle_synergic_command(self, command: str):
         """Obsługa komend dla Synergic (komputer)"""
         return "💻 Synergic: Gotowy do ciężkich obliczeń. DeepSeek 34B oczekuje na wdrożenie."
 
@@ -132,20 +132,22 @@ def main():
         print("❌ Błąd: Nie ustawiono BOT_TOKEN!")
         return
 
-    # Utwórz Application i przekaż token
-    application = Application.builder().token(token).build()
+    # Utwórz Updater (dla wersji 13.x)
+    updater = Updater(token, use_context=True)
+    dp = updater.dispatcher
 
     # Dodaj handlery
-    application.add_handler(CommandHandler("start", sentry_system.start_command))
-    application.add_handler(CommandHandler("register", sentry_system.register_command))
-    application.add_handler(CommandHandler("agents", sentry_system.agents_command))
-    application.add_handler(CommandHandler("status", sentry_system.agents_command))
-    application.add_handler(CallbackQueryHandler(sentry_system.button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, sentry_system.handle_agent_message))
+    dp.add_handler(CommandHandler("start", sentry_system.start_command))
+    dp.add_handler(CommandHandler("register", sentry_system.register_command))
+    dp.add_handler(CommandHandler("agents", sentry_system.agents_command))
+    dp.add_handler(CommandHandler("status", sentry_system.agents_command))
+    dp.add_handler(CallbackQueryHandler(sentry_system.button_handler))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, sentry_system.handle_agent_message))
 
     # Uruchom bota
     print("🟢 Sentry One System starting...")
-    application.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
     main()
