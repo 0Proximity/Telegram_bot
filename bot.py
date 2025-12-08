@@ -6,17 +6,22 @@ Simple, reliable, no webhook issues
 
 import os
 import asyncio
-import threading
-from flask import Flask, jsonify
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-app = Flask(__name__)
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 TELEGRAM_TOKEN = "8490381532:AAETsrsXJzUn-gJHNGASnIqC_3hjtOwaqic"
 
 # Store for agents
 agents = {
-    "echo": {"name": "Echo", "status": "offline", "type": "phone"},
+    "echo": {"name": "Echo", "status": "online", "type": "phone"},
     "vector": {"name": "Vector", "status": "offline", "type": "tablet"},
     "visor": {"name": "Visor", "status": "offline", "type": "oculus"},
     "synergic": {"name": "Synergic", "status": "offline", "type": "computer"}
@@ -29,7 +34,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Agents:*\n• 📱 Echo - Phone Observer\n• 📟 Vector - Tablet Creator\n"
         "• 🕶️ Visor - Oculus Immersor\n• 💻 Synergic - Computer Processor\n\n"
         "*Commands:*\n/start - Welcome\n/agents - Agent status\n"
-        "/test - Connection test\n/echo [command] - Command Echo",
+        "/test - Connection test\n/echo [command] - Command Echo\n"
+        "/status - System status",
         parse_mode='Markdown'
     )
 
@@ -51,9 +57,44 @@ async def echo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Sentry One operational! Polling mode active.")
 
-# Setup and run bot
-async def run_bot():
-    print("🤖 Starting Telegram bot in polling mode...")
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    online_count = sum(1 for a in agents.values() if a["status"] == "online")
+    await update.message.reply_text(
+        f"📊 *SYSTEM STATUS*\n\n"
+        f"• Bot: ✅ Online\n"
+        f"• Mode: 🔄 Polling\n"
+        f"• Agents: {online_count}/{len(agents)} online\n"
+        f"• Use /agents for details",
+        parse_mode='Markdown'
+    )
+
+async def set_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set agent status (admin only)"""
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /set <agent_name> <online|offline>")
+        return
+    
+    agent_name = context.args[0].lower()
+    status = context.args[1].lower()
+    
+    if agent_name not in agents:
+        await update.message.reply_text(f"❌ Agent '{agent_name}' not found")
+        return
+    
+    if status not in ["online", "offline"]:
+        await update.message.reply_text("❌ Status must be 'online' or 'offline'")
+        return
+    
+    agents[agent_name]["status"] = status
+    await update.message.reply_text(f"✅ {agents[agent_name]['name']} set to {status}")
+
+# Main function
+async def main():
+    """Start the bot."""
+    print("🤖 Starting SENTRY ONE in polling mode...")
+    print(f"📝 Token: {TELEGRAM_TOKEN[:10]}...")
+    
+    # Create application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     # Add handlers
@@ -61,61 +102,19 @@ async def run_bot():
     application.add_handler(CommandHandler("agents", agents_command))
     application.add_handler(CommandHandler("echo", echo_command))
     application.add_handler(CommandHandler("test", test_command))
+    application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("set", set_command))
     
     # Start polling
-    await application.initialize()
-    await application.start()
-    print("✅ Bot started with polling")
+    print("🔄 Starting polling...")
+    print("✅ Bot is running! Press Ctrl+C to stop.")
     
-    # Run forever
-    await application.updater.start_polling()
-    await application.stop()
-
-# Start bot in background thread
-def start_bot():
-    asyncio.run(run_bot())
-
-bot_thread = threading.Thread(target=start_bot, daemon=True)
-bot_thread.start()
-
-# Flask routes
-@app.route('/')
-def home():
-    return jsonify({
-        "status": "online",
-        "mode": "polling",
-        "bot": "active",
-        "agents_count": len(agents),
-        "message": "Sentry One running in polling mode"
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy", "bot": "polling"})
-
-@app.route('/dashboard')
-def dashboard():
-    online = sum(1 for a in agents.values() if a["status"] == "online")
-    return jsonify({
-        "agents": agents,
-        "online_agents": online,
-        "offline_agents": len(agents) - online,
-        "total_agents": len(agents)
-    })
-
-@app.route('/register', methods=['POST'])
-def register_agent():
-    data = request.json
-    agent_id = data.get("agent_id", "").lower()
-    
-    if agent_id in agents:
-        agents[agent_id]["status"] = "online"
-        return jsonify({"status": "registered", "agent": agents[agent_id]})
-    return jsonify({"error": "Agent not found"}), 404
+    await application.run_polling()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    print(f"🚀 Starting Sentry One on port {port}")
-    print(f"🤖 Bot token: {TELEGRAM_TOKEN[:10]}...")
-    print("📊 Dashboard: http://localhost:{}/dashboard".format(port))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Shutting down SENTRY ONE...")
+    except Exception as e:
+        print(f"❌ Error: {e}")
