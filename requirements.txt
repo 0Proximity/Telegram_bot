@@ -1,1 +1,27 @@
-python-telegram-bot==13.15
+# Podstawowe
+requests>=2.31.0
+python-telegram-bot>=20.7
+Flask>=3.0.0
+
+# AI/ML
+torch>=2.1.0
+transformers>=4.36.0
+accelerate>=0.25.0
+bitsandbytes>=0.41.0
+
+# System monitoring
+psutil>=5.9.0
+GPUtil>=1.4.0
+
+# Audio
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+pyaudio>=0.2.11
+
+# Computer vision
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+
+# Additional
+schedule>=1.2.0
+cryptography>=41.0.0
