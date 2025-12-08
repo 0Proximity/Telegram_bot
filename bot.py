@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 🤖 SENTRY ONE - Universal AI Ecosystem Controller
-Version: 1.0.0
+Version: 1.0.0 - Webhook Edition for Render
 Devices: Echo (Phone), Vector (Tablet), Visor (Oculus), Synergic (Computer)
+Webhook URL: https://telegram-bot-1-7l4g.onrender.com
 """
 
 import os
@@ -27,7 +28,7 @@ from telegram.ext import (
 
 # Web Framework (for Render deployment)
 from flask import Flask, request, jsonify
-from threading import Thread
+import threading
 import requests
 
 # ----------------------------------------------------------------------
@@ -37,13 +38,13 @@ import requests
 class Config:
     """Global configuration for Sentry One"""
     
-    # Telegram Bot Token (set in environment)
+    # Telegram Bot Token (set in environment on Render)
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
     
-    # Webhook URL for Render
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
+    # Webhook URL for Render (your actual URL)
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-bot-1-7l4g.onrender.com")
     
-    # Port for Flask server
+    # Port for Flask server (Render sets this automatically)
     PORT = int(os.getenv("PORT", 8080))
     
     # Admin user IDs
@@ -486,62 +487,97 @@ class TelegramBot:
         
         await update.message.reply_text(response_text, parse_mode='Markdown')
     
-    def setup_handlers(self):
+    def setup_handlers(self, application: Application):
         """Setup all Telegram handlers"""
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CommandHandler("agents", self.agents_command))
-        self.application.add_handler(CommandHandler("echo", self.echo_command))
-        self.application.add_handler(CommandHandler("vector", self.vector_command))
-        self.application.add_handler(CommandHandler("visor", self.visor_command))
-        self.application.add_handler(CommandHandler("synergic", self.synergic_command))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.message_handler))
-    
-    async def start_bot(self):
-        """Start the Telegram bot"""
-        # Create Application
-        self.application = Application.builder().token(Config.TELEGRAM_TOKEN).build()
-        
-        # Setup handlers
-        self.setup_handlers()
-        
-        # Start bot
-        await self.application.initialize()
-        await self.application.start()
-        
-        print("🤖 Sentry One Telegram Bot started!")
-        
-        # Run until stopped
-        await self.application.updater.start_polling()
-        await self.application.stop()
+        application.add_handler(CommandHandler("start", self.start_command))
+        application.add_handler(CommandHandler("agents", self.agents_command))
+        application.add_handler(CommandHandler("echo", self.echo_command))
+        application.add_handler(CommandHandler("vector", self.vector_command))
+        application.add_handler(CommandHandler("visor", self.visor_command))
+        application.add_handler(CommandHandler("synergic", self.synergic_command))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.message_handler))
 
 # ----------------------------------------------------------------------
-# FLASK API FOR AGENT COMMUNICATION
+# FLASK API & WEBHOOK SETUP
 # ----------------------------------------------------------------------
 
 app = Flask(__name__)
 agent_manager = AgentManager()
-telegram_bot = None
+telegram_bot = TelegramBot(agent_manager)
+telegram_application = None  # Will be set during initialization
 
+# Initialize Telegram bot asynchronously
+async def initialize_telegram_bot():
+    """Initialize Telegram bot with webhook"""
+    global telegram_application
+    
+    if not Config.TELEGRAM_TOKEN:
+        print("⚠️ TELEGRAM_TOKEN not set. Telegram bot disabled.")
+        return
+    
+    # Create application
+    telegram_application = Application.builder().token(Config.TELEGRAM_TOKEN).build()
+    
+    # Setup handlers
+    telegram_bot.setup_handlers(telegram_application)
+    
+    # Initialize (but don't start polling)
+    await telegram_application.initialize()
+    
+    # Set webhook URL
+    webhook_url = f"{Config.WEBHOOK_URL}/webhook"
+    await telegram_application.bot.set_webhook(url=webhook_url)
+    
+    print(f"✅ Telegram bot initialized with webhook: {webhook_url}")
+    print(f"🤖 Bot username: @{(await telegram_application.bot.get_me()).username}")
+
+# Run initialization in event loop
+def start_telegram_init():
+    """Start Telegram initialization in background thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(initialize_telegram_bot())
+
+# Start initialization in background thread
+telegram_thread = threading.Thread(target=start_telegram_init, daemon=True)
+telegram_thread.start()
+
+# Flask Routes
 @app.route('/')
 def home():
     return jsonify({
         "status": "online",
         "service": "Sentry One AI Ecosystem",
         "version": "1.0.0",
-        "agents": len(agent_manager.agents),
+        "webhook": f"{Config.WEBHOOK_URL}/webhook",
         "endpoints": {
             "/": "This page",
             "/health": "Health check",
-            "/register": "Register agent",
-            "/heartbeat": "Agent heartbeat",
-            "/commands": "Get pending commands",
-            "/complete": "Complete command"
+            "/webhook": "Telegram webhook (POST only)",
+            "/register": "Register agent (POST)",
+            "/heartbeat": "Agent heartbeat (POST)",
+            "/commands": "Get pending commands (GET)",
+            "/complete": "Complete command (POST)",
+            "/status/<agent_id>": "Get agent status (GET)",
+            "/dashboard": "Dashboard overview (GET)"
         }
     })
 
 @app.route('/health')
 def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    """Endpoint for Telegram webhook"""
+    if telegram_application is None:
+        return jsonify({"error": "Telegram bot not initialized"}), 503
+    
+    # Process update
+    update = Update.de_json(request.get_json(force=True), telegram_application.bot)
+    telegram_application.update_queue.put(update)
+    
+    return 'ok'
 
 @app.route('/register', methods=['POST'])
 def register_agent():
@@ -642,165 +678,30 @@ def get_agent_status(agent_id):
     else:
         return jsonify({"error": "agent not found"}), 404
 
-# ----------------------------------------------------------------------
-# AGENT SIDE CLIENT CODE (For Echo, Vector, Visor, Synergic)
-# ----------------------------------------------------------------------
-
-class AgentClient:
-    """Client for agents to connect to Sentry One"""
+@app.route('/dashboard', methods=['GET'])
+def dashboard():
+    """Dashboard overview"""
+    agents = agent_manager.get_all_agents()
+    online_count = sum(1 for a in agents if a and a["status"] == "online")
     
-    def __init__(self, agent_id: str, sentry_url: str):
-        self.agent_id = agent_id
-        self.sentry_url = sentry_url
-        self.running = False
-        
-        # Personality based on agent_id
-        self.personalities = {
-            "echo": EchoPersonality(),
-            "vector": VectorPersonality(),
-            "visor": VisorPersonality(),
-            "synergic": SynergicPersonality()
+    return jsonify({
+        "total_agents": len(agents),
+        "online_agents": online_count,
+        "offline_agents": len(agents) - online_count,
+        "agents": agents,
+        "system": {
+            "telegram_bot": "initialized" if telegram_application else "not_initialized",
+            "webhook_url": Config.WEBHOOK_URL,
+            "server_time": datetime.now().isoformat()
         }
-        self.personality = self.personalities.get(agent_id)
-    
-    def register(self, metadata: Dict = None) -> bool:
-        """Register agent with Sentry One"""
-        try:
-            response = requests.post(
-                f"{self.sentry_url}/register",
-                json={
-                    "agent_id": self.agent_id,
-                    "metadata": metadata or {}
-                },
-                timeout=10
-            )
-            return response.status_code == 200
-        except:
-            return False
-    
-    def send_heartbeat(self) -> bool:
-        """Send heartbeat to Sentry One"""
-        try:
-            response = requests.post(
-                f"{self.sentry_url}/heartbeat",
-                json={"agent_id": self.agent_id},
-                timeout=5
-            )
-            return response.status_code == 200
-        except:
-            return False
-    
-    def get_commands(self) -> List[Dict]:
-        """Get pending commands"""
-        try:
-            response = requests.get(
-                f"{self.sentry_url}/commands",
-                params={"agent_id": self.agent_id},
-                timeout=5
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("commands", [])
-        except:
-            pass
-        
-        return []
-    
-    def complete_command(self, command_id: str, result: str) -> bool:
-        """Mark command as completed"""
-        try:
-            response = requests.post(
-                f"{self.sentry_url}/complete",
-                json={
-                    "command_id": command_id,
-                    "result": result
-                },
-                timeout=5
-            )
-            return response.status_code == 200
-        except:
-            return False
-    
-    def process_command(self, command: str) -> str:
-        """Process a command locally (when offline)"""
-        if self.personality:
-            return self.personality.get_response(command)
-        return f"{self.agent_id}: Command received"
-    
-    def start_loop(self):
-        """Main agent loop"""
-        import time
-        
-        self.running = True
-        
-        # Try to register
-        print(f"🔧 {self.agent_id}: Connecting to Sentry One...")
-        if self.register():
-            print(f"✅ {self.agent_id}: Registered successfully!")
-        else:
-            print(f"⚠️ {self.agent_id}: Running in offline mode")
-        
-        # Main loop
-        while self.running:
-            try:
-                # Send heartbeat if registered
-                if self.send_heartbeat():
-                    # Check for commands
-                    commands = self.get_commands()
-                    
-                    for cmd in commands:
-                        cmd_id = cmd["id"]
-                        cmd_text = cmd["command"]
-                        
-                        print(f"📥 {self.agent_id}: Processing command: {cmd_text}")
-                        
-                        # Process command
-                        result = self.process_command(cmd_text)
-                        
-                        # Mark as completed
-                        if self.complete_command(cmd_id, result):
-                            print(f"✅ {self.agent_id}: Command completed")
-                
-                time.sleep(Config.AGENT_HEARTBEAT_INTERVAL)
-                
-            except KeyboardInterrupt:
-                self.running = False
-                print(f"🛑 {self.agent_id}: Shutting down...")
-            except Exception as e:
-                print(f"❌ {self.agent_id}: Error: {e}")
-                time.sleep(5)
+    })
 
 # ----------------------------------------------------------------------
-# DEPLOYMENT SETUP
+# MAIN ENTRY POINT
 # ----------------------------------------------------------------------
 
-def start_telegram_bot():
-    """Start Telegram bot in background thread"""
-    global telegram_bot
-    
-    if not Config.TELEGRAM_TOKEN:
-        print("⚠️ TELEGRAM_TOKEN not set. Telegram bot disabled.")
-        return
-    
-    telegram_bot = TelegramBot(agent_manager)
-    
-    # Run bot in event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        loop.run_until_complete(telegram_bot.start_bot())
-    except KeyboardInterrupt:
-        print("🤖 Bot stopped")
-
-def start_agent_client(agent_id: str):
-    """Start an agent client (for testing)"""
-    sentry_url = f"http://localhost:{Config.PORT}"
-    client = AgentClient(agent_id, sentry_url)
-    client.start_loop()
-
-if __name__ == "__main__":
+def main():
+    """Main entry point for the application"""
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -810,6 +711,9 @@ if __name__ == "__main__":
     print("""
     ╔═══════════════════════════════════════════════════╗
     ║            🤖 SENTRY ONE ECOSYSTEM                ║
+    ║              Webhook Edition                      ║
+    ║                                                   ║
+    ║  Server: https://telegram-bot-1-7l4g.onrender.com ║
     ║                                                   ║
     ║  Agents:                                          ║
     ║  • 📱 Echo - Phone Observer                       ║
@@ -817,18 +721,22 @@ if __name__ == "__main__":
     ║  • 🕶️ Visor - Oculus Immersor                    ║
     ║  • 💻 Synergic - Computer Processor               ║
     ║                                                   ║
-    ║  Starting services...                             ║
+    ║  Starting Flask server...                         ║
     ╚═══════════════════════════════════════════════════╝
     """)
     
-    # Start Telegram bot in background thread
-    import threading
-    bot_thread = threading.Thread(target=start_telegram_bot, daemon=True)
-    bot_thread.start()
-    
     # Start Flask server
     print(f"🌐 Starting Flask server on port {Config.PORT}...")
-    print(f"📡 API Endpoint: http://localhost:{Config.PORT}/")
-    print(f"📊 Agent status: http://localhost:{Config.PORT}/status/<agent_id>")
+    print(f"📡 Webhook URL: {Config.WEBHOOK_URL}/webhook")
+    print(f"📊 Dashboard: {Config.WEBHOOK_URL}/dashboard")
+    print(f"🩺 Health check: {Config.WEBHOOK_URL}/health")
+    print("\n📝 Available endpoints:")
+    print(f"   • {Config.WEBHOOK_URL}/register - Register agent")
+    print(f"   • {Config.WEBHOOK_URL}/status/echo - Echo status")
+    print(f"   • {Config.WEBHOOK_URL}/commands?agent_id=echo - Get commands")
     
-    app.run(host="0.0.0.0", port=Config.PORT, debug=False)
+    # Run Flask app
+    app.run(host="0.0.0.0", port=Config.PORT, debug=False, threaded=True)
+
+if __name__ == "__main__":
+    main()
