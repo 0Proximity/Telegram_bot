@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sentry-one-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        value: "8490381532:AAETsrsXJzUn-gJHNGASnIqC_3hjtOwaqic"
+    healthCheckPath: /health
