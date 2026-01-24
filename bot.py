@@ -122,7 +122,82 @@ SATELLITES = {
     }
 }
 
-# ====================== NOWE FUNKCJE POGODOWE ======================
+# ====================== FUNKCJE POGODOWE ======================
+def get_openweather_data(lat, lon):
+    """Pobierz aktualną pogodę z OpenWeather"""
+    try:
+        url = f"{OPENWEATHER_URL}/weather"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": OPENWEATHER_API_KEY,
+            "units": "metric",
+            "lang": "pl"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code != 200:
+            logger.error(f"OpenWeather error: {data}")
+            return None
+        
+        return {
+            "temp": data["main"]["temp"],
+            "feels_like": data["main"]["feels_like"],
+            "humidity": data["main"]["humidity"],
+            "pressure": data["main"]["pressure"],
+            "wind_speed": data["wind"]["speed"],
+            "wind_deg": data["wind"].get("deg", 0),
+            "clouds": data["clouds"]["all"],
+            "visibility": data.get("visibility", 10000) / 1000,  # m -> km
+            "description": data["weather"][0]["description"],
+            "weather_main": data["weather"][0]["main"],
+            "icon": data["weather"][0]["icon"],
+            "sunrise": datetime.fromtimestamp(data["sys"]["sunrise"]).strftime("%H:%M"),
+            "sunset": datetime.fromtimestamp(data["sys"]["sunset"]).strftime("%H:%M"),
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+    except Exception as e:
+        logger.error(f"❌ Błąd OpenWeather: {e}")
+        return None
+
+def get_openweather_forecast(lat, lon):
+    """Pobierz prognozę 5-dniową"""
+    try:
+        url = f"{OPENWEATHER_URL}/forecast"
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "appid": OPENWEATHER_API_KEY,
+            "units": "metric",
+            "lang": "pl",
+            "cnt": 40
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code != 200:
+            return None
+        
+        forecast = []
+        for item in data["list"][:8]:  # Pierwsze 8 okresów (24h)
+            forecast.append({
+                "time": datetime.fromtimestamp(item["dt"]).strftime("%H:%M"),
+                "temp": item["main"]["temp"],
+                "feels_like": item["main"]["feels_like"],
+                "description": item["weather"][0]["description"],
+                "icon": item["weather"][0]["icon"],
+                "humidity": item["main"]["humidity"],
+                "wind_speed": item["wind"]["speed"]
+            })
+        
+        return forecast
+    except Exception as e:
+        logger.error(f"❌ Błąd prognozy: {e}")
+        return None
+
 def get_5day_forecast(lat: float, lon: float) -> Optional[List]:
     """Pobierz pełną prognozę 5-dniową"""
     try:
@@ -281,7 +356,6 @@ def calculate_sun_position(lat: float, lon: float, date=None):
         date = datetime.now()
     
     # Uproszczone obliczenia astronomiczne
-    # Rzeczywiste obliczenia wymagałyby bardziej skomplikowanych formuł
     day_of_year = date.timetuple().tm_yday
     declination = 23.45 * math.sin(math.radians(360/365 * (day_of_year - 81)))
     
@@ -299,9 +373,494 @@ def calculate_sun_position(lat: float, lon: float, date=None):
         "sunset": f"{int(sunset_hour):02d}:{int((sunset_hour % 1) * 60):02d}"
     }
 
+def get_extended_weather_data(lat: float, lon: float) -> Optional[Dict]:
+    """Pobierz rozszerzone dane pogodowe"""
+    try:
+        # Dane z OpenWeather
+        ow_data = get_openweather_data(lat, lon)
+        if not ow_data:
+            return None
+        
+        # Dodaj pozycję Słońca
+        sun_pos = calculate_sun_position(lat, lon)
+        ow_data["sun_position"] = sun_pos
+        
+        return ow_data
+        
+    except Exception as e:
+        logger.error(f"❌ Błąd pobierania rozszerzonych danych: {e}")
+        return ow_data  # Zwróć przynajmniej podstawowe dane
+
+# ====================== KALENDARZ 13-MIESIĘCZNY ======================
+ASTRONOMICAL_CALENDAR = [
+    # Zaczynamy od Koziorożca (Capricorn) - Słońce w Koziorożcu
+    {
+        "name": "Koziorożec",
+        "symbol": "♑",
+        "element": "Ziemia",
+        "emoji": "🐐",
+        "start_date": (1, 20),  # 20 stycznia
+        "end_date": (2, 16),    # 16 lutego
+        "days": 28,
+        "traits": ["Ambitny", "Praktyczny", "Cierpliwy"],
+        "color": "Brązowy",
+        "stone": "Granat"
+    },
+    # Wodnik (Aquarius) - Słońce w Wodniku
+    {
+        "name": "Wodnik",
+        "symbol": "♒",
+        "element": "Powietrze",
+        "emoji": "🏺",
+        "start_date": (2, 17),  # 17 lutego
+        "end_date": (3, 12),    # 12 marca
+        "days": 24,
+        "traits": ["Innowacyjny", "Humanitarny", "Niezależny"],
+        "color": "Niebieski",
+        "stone": "Ametyst"
+    },
+    # Ryby (Pisces) - Słońce w Rybach
+    {
+        "name": "Ryby",
+        "symbol": "♓",
+        "element": "Woda",
+        "emoji": "🐟",
+        "start_date": (3, 13),  # 13 marca
+        "end_date": (4, 18),    # 18 kwietnia
+        "days": 37,
+        "traits": ["Empatyczny", "Intuicyjny", "Artystyczny"],
+        "color": "Fioletowy",
+        "stone": "Akwarel"
+    },
+    # Baran (Aries) - Słońce w Baranie
+    {
+        "name": "Baran",
+        "symbol": "♈",
+        "element": "Ogień",
+        "emoji": "🐏",
+        "start_date": (4, 19),  # 19 kwietnia
+        "end_date": (5, 14),    # 14 maja
+        "days": 26,
+        "traits": ["Odważny", "Dynamiczny", "Zdeterminowany"],
+        "color": "Czerwony",
+        "stone": "Krwawnik"
+    },
+    # Byk (Taurus) - Słońce w Byku
+    {
+        "name": "Byk",
+        "symbol": "♉",
+        "element": "Ziemia",
+        "emoji": "🐂",
+        "start_date": (5, 15),  # 15 maja
+        "end_date": (6, 21),    # 21 czerwca
+        "days": 38,
+        "traits": ["Zdeterminowany", "Wierny", "Zmysłowy"],
+        "color": "Zielony",
+        "stone": "Szmaragd"
+    },
+    # Bliźnięta (Gemini) - Słońce w Bliźniętach
+    {
+        "name": "Bliźnięta",
+        "symbol": "♊",
+        "element": "Powietrze",
+        "emoji": "👯",
+        "start_date": (6, 22),  # 22 czerwca
+        "end_date": (7, 20),    # 20 lipca
+        "days": 29,
+        "traits": ["Komunikatywny", "Ciekawy", "Elastyczny"],
+        "color": "Żółty",
+        "stone": "Akwamaryn"
+    },
+    # Rak (Cancer) - Słońce w Raku
+    {
+        "name": "Rak",
+        "symbol": "♋",
+        "element": "Woda",
+        "emoji": "🦀",
+        "start_date": (7, 21),  # 21 lipca
+        "end_date": (8, 10),    # 10 sierpnia
+        "days": 21,
+        "traits": ["Troskliwy", "Intuicyjny", "Wrażliwy"],
+        "color": "Srebrny",
+        "stone": "Perła"
+    },
+    # Lew (Leo) - Słońce w Lwie
+    {
+        "name": "Lew",
+        "symbol": "♌",
+        "element": "Ogień",
+        "emoji": "🦁",
+        "start_date": (8, 11),  # 11 sierpnia
+        "end_date": (9, 16),    # 16 września
+        "days": 37,
+        "traits": ["Kreatywny", "Hojny", "Ciepły"],
+        "color": "Pomarańczowy",
+        "stone": "Rubin"
+    },
+    # Panna (Virgo) - Słońce w Pannie
+    {
+        "name": "Panna",
+        "symbol": "♍",
+        "element": "Ziemia",
+        "emoji": "🌾",
+        "start_date": (9, 17),  # 17 września
+        "end_date": (10, 30),   # 30 października
+        "days": 44,
+        "traits": ["Analityczny", "Praktyczny", "Skrupulatny"],
+        "color": "Brązowy",
+        "stone": "Sapphir"
+    },
+    # Waga (Libra) - Słońce w Wadze
+    {
+        "name": "Waga",
+        "symbol": "♎",
+        "element": "Powietrze",
+        "emoji": "⚖️",
+        "start_date": (10, 31),  # 31 października
+        "end_date": (11, 23),    # 23 listopada
+        "days": 24,
+        "traits": ["Dyplomatyczny", "Sprawiedliwy", "Społeczny"],
+        "color": "Niebieski",
+        "stone": "Opal"
+    },
+    # Skorpion (Scorpio) - Słońce w Skorpionie
+    {
+        "name": "Skorpion",
+        "symbol": "♏",
+        "element": "Woda",
+        "emoji": "🦂",
+        "start_date": (11, 24),  # 24 listopada
+        "end_date": (11, 29),    # 29 listopada
+        "days": 6,
+        "traits": ["Namiętny", "Zdeterminowany", "Intensywny"],
+        "color": "Czarny",
+        "stone": "Topaz"
+    },
+    # Wężownik (Ophiuchus) - Słońce w Wężowniku
+    {
+        "name": "Wężownik",
+        "symbol": "⛎",
+        "element": "Ogień",
+        "emoji": "🐍",
+        "start_date": (11, 30),  # 30 listopada
+        "end_date": (12, 17),    # 17 grudnia
+        "days": 18,
+        "traits": ["Uzdrowiciel", "Mądry", "Tajemniczy"],
+        "color": "Purpurowy",
+        "stone": "Szafir"
+    },
+    # Strzelec (Sagittarius) - Słońce w Strzelcu
+    {
+        "name": "Strzelec",
+        "symbol": "♐",
+        "element": "Ogień",
+        "emoji": "🏹",
+        "start_date": (12, 18),  # 18 grudnia
+        "end_date": (1, 19),     # 19 stycznia
+        "days": 33,
+        "traits": ["Optymistyczny", "Przygodowy", "Szczery"],
+        "color": "Fioletowy",
+        "stone": "Turkus"
+    }
+]
+
+def get_astronomical_date():
+    """Zwróć prawidłową datę astronomiczną"""
+    now = datetime.now()
+    current_month = now.month
+    current_day = now.day
+    
+    # Sprawdź w którym miesiącu astronomicznym jesteśmy
+    for month in ASTRONOMICAL_CALENDAR:
+        start_month, start_day = month["start_date"]
+        end_month, end_day = month["end_date"]
+        
+        if (current_month == start_month and current_day >= start_day) or \
+           (current_month == end_month and current_day <= end_day) or \
+           (start_month > end_month and 
+            ((current_month == start_month and current_day >= start_day) or
+             (current_month == end_month and current_day <= end_day) or
+             (current_month > start_month or current_month < end_month))):
+            
+            # Oblicz dzień w miesiącu astronomicznym
+            if start_month <= end_month:
+                if current_month == start_month:
+                    day_in_month = current_day - start_day + 1
+                else:
+                    days_from_start = 0
+                    if current_month > start_month:
+                        for m in range(start_month, current_month):
+                            if m == start_month:
+                                days_in_month = 31 if m in [1, 3, 5, 7, 8, 10, 12] else 30 if m in [4, 6, 9, 11] else 28
+                                days_from_start += days_in_month - start_day + 1
+                            else:
+                                days_in_month = 31 if m in [1, 3, 5, 7, 8, 10, 12] else 30 if m in [4, 6, 9, 11] else 28
+                                days_from_start += days_in_month
+                    day_in_month = days_from_start + current_day
+            else:
+                if current_month >= start_month:
+                    if current_month == start_month:
+                        day_in_month = current_day - start_day + 1
+                    else:
+                        days_in_december = 31 - start_day + 1
+                        day_in_month = days_in_december + current_day
+                else:
+                    day_in_month = current_day + (31 - start_day + 1)
+            
+            return {
+                "day": day_in_month,
+                "month": month["name"],
+                "symbol": month["symbol"],
+                "element": month["element"],
+                "emoji": month["emoji"],
+                "traits": month["traits"],
+                "color": month["color"],
+                "stone": month["stone"],
+                "gregorian": now.strftime("%d.%m.%Y"),
+                "days_in_month": month["days"],
+                "day_of_year": now.timetuple().tm_yday
+            }
+    
+    return {
+        "day": 1,
+        "month": "Koziorożec",
+        "symbol": "♑",
+        "element": "Ziemia",
+        "emoji": "🐐",
+        "traits": ["Ambitny", "Praktyczny", "Cierpliwy"],
+        "color": "Brązowy",
+        "stone": "Granat",
+        "gregorian": now.strftime("%d.%m.%Y"),
+        "days_in_month": 28,
+        "day_of_year": now.timetuple().tm_yday
+    }
+
+def calculate_moon_phase():
+    """Oblicz fazę księżyca z dużą dokładnością"""
+    now = datetime.now()
+    days_in_moon_cycle = 29.530588853
+    last_new_moon = datetime(2026, 1, 10, 12, 0, 0)
+    days_since_new = (now - last_new_moon).total_seconds() / 86400
+    
+    moon_phase = (days_since_new % days_in_moon_cycle) / days_in_moon_cycle
+    
+    phases = [
+        (0.0, "🌑 Nów", "Księżyc niewidoczny", 0),
+        (0.25, "🌒 Rosnący sierp", "Widoczny wieczorem", 25),
+        (0.5, "🌓 Pierwsza kwadra", "Połowa widoczna", 50),
+        (0.75, "🌔 Ubywający garbaty", "Prawie pełny", 75),
+        (1.0, "🌕 Pełnia", "Cały widoczny", 100),
+        (1.25, "🌖 Malejący garbaty", "Prawie pełny", 75),
+        (1.5, "🌗 Ostatnia kwadra", "Połowa widoczna", 50),
+        (1.75, "🌘 Malejący sierp", "Widoczny rano", 25)
+    ]
+    
+    for phase_value, emoji_name, description, illumination in phases:
+        if moon_phase <= phase_value:
+            return {
+                "emoji": emoji_name.split()[0],
+                "name": emoji_name.split()[1],
+                "description": description,
+                "illumination": illumination,
+                "phase": round(moon_phase, 3)
+            }
+    
+    return {
+        "emoji": "🌑",
+        "name": "Nów",
+        "description": "Księżyc niewidoczny",
+        "illumination": 0,
+        "phase": round(moon_phase, 3)
+    }
+
+# ====================== FUNKCJE POMOCNICZE ======================
+def get_weather_icon(icon_code):
+    """Mapuj kod ikony na emoji"""
+    icon_map = {
+        "01d": "☀️", "01n": "🌙",
+        "02d": "⛅", "02n": "⛅",
+        "03d": "☁️", "03n": "☁️",
+        "04d": "☁️", "04n": "☁️",
+        "09d": "🌧️", "09n": "🌧️",
+        "10d": "🌦️", "10n": "🌦️",
+        "11d": "⛈️", "11n": "⛈️",
+        "13d": "❄️", "13n": "❄️",
+        "50d": "🌫️", "50n": "🌫️"
+    }
+    return icon_map.get(icon_code, "🌤️")
+
+def get_wind_direction(degrees):
+    """Konwertuj stopnie na kierunek wiatru"""
+    directions = ["↓ Północ", "↘ Północny-Wschód", "→ Wschód", "↗ Południowy-Wschód",
+                  "↑ Południe", "↖ Południowy-Zachód", "← Zachód", "↙ Północny-Zachód"]
+    index = round(degrees / 45) % 8
+    return directions[index]
+
+def get_visibility_score(weather_data):
+    """Oblicz wynik widoczności na podstawie warunków pogodowych"""
+    if not weather_data:
+        return {"score": 0, "emoji": "🌧️", "category": "ZŁE"}
+    
+    score = 100
+    
+    score -= min(weather_data["clouds"] / 2, 50)
+    score -= max(0, (weather_data["humidity"] - 60) / 2)
+    score -= min(weather_data["wind_speed"] * 2, 20)
+    
+    if weather_data["visibility"] > 20:
+        score += 10
+    
+    score = max(0, min(100, score))
+    
+    for category, threshold in VISIBILITY_THRESHOLDS.items():
+        if score >= threshold["min"]:
+            return {
+                "score": round(score),
+                "emoji": threshold["emoji"],
+                "category": threshold["name"]
+            }
+    
+    return {"score": round(score), "emoji": "🌧️", "category": "ZŁE"}
+
+def get_star_visibility(weather_data):
+    """Określ widoczność gwiazd"""
+    if not weather_data:
+        return "☁️ Brak danych"
+    
+    if weather_data["clouds"] < 20 and weather_data["visibility"] > 15:
+        return "✨ Doskonała widoczność gwiazd"
+    elif weather_data["clouds"] < 40 and weather_data["visibility"] > 10:
+        return "⭐ Dobra widoczność gwiazd"
+    elif weather_data["clouds"] < 60:
+        return "🌟 Umiarkowana widoczność"
+    else:
+        return "☁️ Słaba widoczność gwiazd"
+
+def create_progress_bar(value, max_value=100, length=10):
+    """Twórz pasek postępu"""
+    filled = int((value / max_value) * length)
+    empty = length - filled
+    return "█" * filled + "░" * empty
+
+# ====================== FORMATOWANIE WIADOMOŚCI ======================
+def create_beautiful_header(title, emoji="🌌"):
+    """Twórz piękny nagłówek wiadomości"""
+    border = "═" * 40
+    return f"{border}\n{emoji} <b>{title}</b>\n{border}\n\n"
+
+def create_section(title, emoji="📊"):
+    """Twórz sekcję wiadomości"""
+    return f"\n{emoji} <b>{title}</b>\n"
+
+def create_info_line(label, value, emoji="•"):
+    """Twórz linię informacyjną"""
+    return f"{emoji} <b>{label}:</b> {value}\n"
+
+def create_progress_display(label, value, max_value=100):
+    """Twórz wyświetlacz z paskiem postępu"""
+    bar = create_progress_bar(value, max_value)
+    percent = (value / max_value) * 100
+    return f"• <b>{label}:</b> {bar} {value}/{max_value} ({percent:.0f}%)\n"
+
+def send_telegram_message(chat_id, text):
+    """Wyślij wiadomość przez Telegram API"""
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ Błąd wysyłania wiadomości: {e}")
+        return None
+
+# ====================== GENEROWANIE RAPORTÓW ======================
+def generate_full_astro_report(city_key):
+    """Wygeneruj pełny raport astrometeorologiczny"""
+    city = OBSERVATION_CITIES.get(city_key)
+    if not city:
+        return "❌ Nieznane miasto"
+    
+    weather_data = get_openweather_data(city["lat"], city["lon"])
+    if not weather_data:
+        return "❌ Nie udało się pobrać danych pogodowych"
+    
+    forecast_data = get_openweather_forecast(city["lat"], city["lon"])
+    moon_data = calculate_moon_phase()
+    astro_date = get_astronomical_date()
+    visibility_score = get_visibility_score(weather_data)
+    
+    report = ""
+    
+    report += create_beautiful_header(f"COSMOS SENTRY - {city['name'].upper()}", city['emoji'])
+    
+    report += create_section("📅 DATA I CZAS", "⏱️")
+    report += create_info_line("Data kalendarzowa", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
+    report += create_info_line("Data astronomiczna", f"{astro_date['day']}/{astro_date['days_in_month']} {astro_date['symbol']} {astro_date['month']}")
+    report += create_info_line("Domena", f"{astro_date['element']} {astro_date['emoji']}")
+    
+    report += create_section("🌤️ AKTUALNA POGODA", get_weather_icon(weather_data["icon"]))
+    report += create_info_line("Stan", f"{weather_data['description'].capitalize()}")
+    report += create_info_line("Temperatura", f"{weather_data['temp']:.1f}°C (odczuwalna {weather_data['feels_like']:.1f}°C)")
+    report += create_info_line("Wilgotność", f"{weather_data['humidity']}%")
+    report += create_info_line("Ciśnienie", f"{weather_data['pressure']} hPa")
+    report += create_info_line("Wiatr", f"{weather_data['wind_speed']} m/s {get_wind_direction(weather_data['wind_deg'])}")
+    report += create_info_line("Zachmurzenie", f"{weather_data['clouds']}%")
+    report += create_info_line("Widoczność", f"{weather_data['visibility']:.1f} km")
+    report += create_info_line("Słońce", f"Wschód: {weather_data['sunrise']} | Zachód: {weather_data['sunset']}")
+    
+    report += create_section("🌙 KSIĘŻYC", moon_data["emoji"])
+    report += create_info_line("Faza", f"{moon_data['name']}")
+    report += create_info_line("Oświetlenie", f"{moon_data['illumination']}%")
+    
+    report += create_section("🔭 WARUNKI OBSERWACYJNE", visibility_score["emoji"])
+    report += create_info_line("Ocena", f"{visibility_score['category']}")
+    report += create_info_line("Wynik", f"{visibility_score['score']}/100")
+    
+    report += f"\n{'═' * 40}\n"
+    report += f"<i>🌌 COSMOS SENTRY v2.0 | Data: {weather_data['timestamp']}</i>"
+    
+    return report
+
+def generate_calendar_report():
+    """Wygeneruj raport kalendarza"""
+    now = datetime.now()
+    current_astro_date = get_astronomical_date()
+    
+    report = ""
+    report += create_beautiful_header("PRAWIDŁOWY KALENDARZ 13-MIESIĘCZNY", "📅")
+    
+    report += create_section("🎯 AKTUALNY MIESIĄC", current_astro_date["symbol"])
+    report += create_info_line("Nazwa", f"{current_astro_date['month']} {current_astro_date['emoji']}")
+    report += create_info_line("Dzień", f"{current_astro_date['day']}/{current_astro_date['days_in_month']}")
+    report += create_info_line("Żywioł", current_astro_date["element"])
+    report += create_info_line("Cechy", ", ".join(current_astro_date["traits"]))
+    
+    report += create_section("🗓️ PEŁNY KALENDARZ 13-MIESIĘCZNY", "📆")
+    
+    for month in ASTRONOMICAL_CALENDAR:
+        start_month, start_day = month["start_date"]
+        end_month, end_day = month["end_date"]
+        
+        start_str = f"{start_day:02d}.{start_month:02d}"
+        end_str = f"{end_day:02d}.{end_month:02d}"
+        
+        current_marker = " 🔸" if month["name"] == current_astro_date["month"] else ""
+        report += f"• {month['symbol']} <b>{month['name']}</b> {month['emoji']}\n"
+        report += f"  {start_str} - {end_str} ({month['days']} dni){current_marker}\n"
+    
+    report += f"\n{'═' * 40}\n"
+    report += f"<i>🌌 Prawdziwy kalendarz astronomiczny | COSMOS SENTRY v2.0</i>"
+    
+    return report
+
 # ====================== FORMATOWANIE PROGNOZ ======================
 def format_5day_forecast(forecast_data: List, city_name: str) -> str:
-    """Sformatuj prognozę 5-dniową w piękny sposób"""
+    """Sformatuj prognozę 5-dniową"""
     if not forecast_data:
         return "❌ Nie udało się pobrać prognozy"
     
@@ -319,14 +878,14 @@ def format_5day_forecast(forecast_data: List, city_name: str) -> str:
     
     today = datetime.now()
     
-    for day_idx, day_data in enumerate(forecast_data[:5]):  # Maksymalnie 5 dni
+    for day_idx, day_data in enumerate(forecast_data[:5]):
         date_obj = datetime.strptime(f"{day_data['date']}.{today.year}", "%d.%m.%Y")
         day_name = day_names_pl[date_obj.weekday()]
         
         message += f"\n{create_section(f'{day_data['date']} ({day_name}):', '📅')}"
         message += f"🌡️ <b>Temp:</b> {day_data['temp_min']:.1f}°C / {day_data['temp_max']:.1f}°C\n"
         
-        for period in day_data["periods"][:3]:  # 3 okresy dziennie
+        for period in day_data["periods"][:3]:
             emoji = get_weather_icon(period["icon"])
             message += f"• <b>{period['time']}:</b> {period['temp']:.1f}°C | {emoji} {period['description']}\n"
     
@@ -345,7 +904,6 @@ def format_satellite_info(satellite_key: str, city_key: str = "warszawa") -> str
     
     message = create_beautiful_header(f"SATELLITE TRACKING - {satellite['name'].upper()}", satellite['emoji'])
     
-    # Pozycja satelity
     position = get_satellite_position(satellite["id"], city["lat"], city["lon"])
     if position:
         message += create_section("📍 AKTUALNA POZYCJA", "🛰️")
@@ -353,25 +911,17 @@ def format_satellite_info(satellite_key: str, city_key: str = "warszawa") -> str
         message += create_info_line("Długość", f"{position['lon']:.4f}°")
         message += create_info_line("Wysokość", f"{position['alt']:.2f} km")
         message += create_info_line("Prędkość", f"{position['velocity']:.1f} km/s")
-        message += create_info_line("Czas danych", position['timestamp'])
-    else:
-        message += "⚠️ Brak danych o pozycji\n"
     
-    # Nadchodzące przeloty
     passes = get_satellite_passes(satellite["id"], city["lat"], city["lon"])
     if passes:
         message += create_section("🕐 NADCHODZĄCE PRZELOTY", "⏰")
-        for pass_data in passes[:2]:  # 2 najbliższe przeloty
+        for pass_data in passes[:2]:
             message += f"• <b>{pass_data['start']} - {pass_data['end']}</b>\n"
             message += f"  Czas: {pass_data['duration']}s | Wysokość: {pass_data['max_elevation']}°\n"
-    else:
-        message += "⚠️ Brak nadchodzących przelotów\n"
     
-    # Informacje ogólne
     message += create_section("📋 INFORMACJE", "ℹ️")
     message += create_info_line("ID satelity", str(satellite["id"]))
     message += create_info_line("Opis", satellite["description"])
-    message += create_info_line("Lokalizacja", f"{city['name']} {city['emoji']}")
     
     message += f"\n{'═' * 40}\n"
     message += f"<i>🛰️ Źródło: N2YO API | Lokalizacja: {city['name']}</i>"
@@ -404,46 +954,6 @@ def format_satellites_list() -> str:
     
     return message
 
-# ====================== ROZSZERZONE FUNKCJE POMOCNICZE ======================
-def get_extended_weather_data(lat: float, lon: float) -> Optional[Dict]:
-    """Pobierz rozszerzone dane pogodowe z OpenWeather i OpenMeteo"""
-    try:
-        # Dane z OpenWeather
-        ow_data = get_openweather_data(lat, lon)
-        if not ow_data:
-            return None
-        
-        # Dodatkowe dane z OpenMeteo
-        try:
-            params = {
-                "latitude": lat,
-                "longitude": lon,
-                "hourly": ["temperature_2m", "precipitation", "cloud_cover", "visibility"],
-                "forecast_days": 2
-            }
-            response = requests.get(OPENMETEO_URL, params=params, timeout=10)
-            meteodata = response.json()
-            
-            if "hourly" in meteodata:
-                ow_data["hourly"] = meteodata["hourly"]
-        except:
-            pass
-        
-        # Oblicz pozycję Słońca
-        sun_pos = calculate_sun_position(lat, lon)
-        ow_data["sun_position"] = sun_pos
-        
-        return ow_data
-        
-    except Exception as e:
-        logger.error(f"❌ Błąd pobierania rozszerzonych danych: {e}")
-        return ow_data  # Zwróć przynajmniej podstawowe dane
-
-# ====================== KALENDARZ (pozostał bez zmian) ======================
-ASTRONOMICAL_CALENDAR = [
-    # ... (tu pozostaje cały istniejący kalendarz bez zmian)
-]
-
 # ====================== LOGGING ======================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -451,7 +961,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ====================== FLASK APP z nowymi komendami ======================
+# ====================== FLASK APP ======================
 app = Flask(__name__)
 
 @app.route('/')
@@ -598,7 +1108,7 @@ def home():
     '''
     return html
 
-# ====================== TELEGRAM WEBHOOK z nowymi komendami ======================
+# ====================== TELEGRAM WEBHOOK ======================
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Główny endpoint dla webhook Telegram"""
@@ -641,7 +1151,7 @@ def webhook():
                 )
                 send_telegram_message(chat_id, welcome_msg)
             
-            # Komenda /forecast5 (prognoza 5-dniowa)
+            # Komenda /forecast5
             elif text.startswith("/forecast5"):
                 args = text[10:].strip().lower()
                 
@@ -669,7 +1179,6 @@ def webhook():
             elif text.startswith("/sat_"):
                 sat_key = text[5:].lower()
                 if sat_key in SATELLITES:
-                    # Można dodać opcjonalne miasto: /sat_iss_warszawa
                     city_key = "warszawa"
                     if "_" in sat_key:
                         parts = sat_key.split("_")
@@ -708,7 +1217,101 @@ def webhook():
                 else:
                     send_telegram_message(chat_id, "❌ Nie udało się pobrać zdjęcia dnia NASA")
             
-            # Komenda /help (zaktualizowana)
+            # Komenda /astro
+            elif text.startswith("/astro"):
+                args = text[6:].strip().lower()
+                
+                if not args:
+                    args = "warszawa"
+                
+                if args in OBSERVATION_CITIES:
+                    report = generate_full_astro_report(args)
+                    send_telegram_message(chat_id, report)
+                else:
+                    send_telegram_message(chat_id, "❌ Nieznane miasto. Dostępne: warszawa, koszalin, krakow, gdansk, wroclaw")
+            
+            # Komenda /calendar
+            elif text == "/calendar":
+                report = generate_calendar_report()
+                send_telegram_message(chat_id, report)
+            
+            # Komenda /weather
+            elif text.startswith("/weather"):
+                args = text[8:].strip().lower()
+                
+                if not args:
+                    args = "warszawa"
+                
+                if args in OBSERVATION_CITIES:
+                    city = OBSERVATION_CITIES[args]
+                    weather_data = get_openweather_data(city["lat"], city["lon"])
+                    
+                    if weather_data:
+                        report = create_beautiful_header(f"POGODA - {city['name'].upper()}", city['emoji'])
+                        
+                        report += create_section("🌤️ AKTUALNA POGODA", get_weather_icon(weather_data["icon"]))
+                        report += create_info_line("Stan", f"{weather_data['description'].capitalize()}")
+                        report += create_info_line("Temperatura", f"{weather_data['temp']:.1f}°C")
+                        report += create_info_line("Odczuwalna", f"{weather_data['feels_like']:.1f}°C")
+                        report += create_info_line("Wilgotność", f"{weather_data['humidity']}%")
+                        report += create_info_line("Ciśnienie", f"{weather_data['pressure']} hPa")
+                        report += create_info_line("Wiatr", f"{weather_data['wind_speed']} m/s")
+                        report += create_info_line("Zachmurzenie", f"{weather_data['clouds']}%")
+                        report += create_info_line("Widoczność", f"{weather_data['visibility']:.1f} km")
+                        report += create_info_line("Słońce", f"↑ {weather_data['sunrise']} | ↓ {weather_data['sunset']}")
+                        
+                        report += f"\n{'═' * 40}\n"
+                        report += f"<i>🌤️ OpenWeather API | {weather_data['timestamp']}</i>"
+                        
+                        send_telegram_message(chat_id, report)
+                    else:
+                        send_telegram_message(chat_id, "❌ Nie udało się pobrać danych pogodowych")
+                else:
+                    send_telegram_message(chat_id, "❌ Nieznane miasto. Dostępne: warszawa, koszalin, krakow, gdansk, wroclaw")
+            
+            # Komenda /forecast (stara wersja)
+            elif text.startswith("/forecast"):
+                if "forecast5" not in text:  # To nie jest forecast5
+                    args = text[9:].strip().lower()
+                    
+                    if not args:
+                        args = "warszawa"
+                    
+                    if args in OBSERVATION_CITIES:
+                        city = OBSERVATION_CITIES[args]
+                        forecast = get_openweather_forecast(city["lat"], city["lon"])
+                        
+                        if forecast:
+                            report = create_beautiful_header(f"PROGNOZA - {city['name'].upper()}", city['emoji'])
+                            
+                            for i, period in enumerate(forecast[:6]):
+                                report += f"• {period['time']}: {period['temp']:.1f}°C | {get_weather_icon(period['icon'])} {period['description']}\n"
+                            
+                            report += f"\n{'═' * 40}\n"
+                            report += f"<i>🌤️ Prognoza OpenWeather | {datetime.now().strftime('%H:%M:%S')}</i>"
+                            
+                            send_telegram_message(chat_id, report)
+                        else:
+                            send_telegram_message(chat_id, "❌ Nie udało się pobrać prognozy")
+                    else:
+                        send_telegram_message(chat_id, "❌ Nieznane miasto. Spróbuj /forecast5")
+            
+            # Komenda /moon
+            elif text == "/moon":
+                moon_data = calculate_moon_phase()
+                report = create_beautiful_header("FAZA KSIĘŻYCA", moon_data["emoji"])
+                
+                report += create_section("🌕 FAZA KSIĘŻYCA", moon_data["emoji"])
+                report += create_info_line("Nazwa", moon_data["name"])
+                report += create_info_line("Oświetlenie", f"{moon_data['illumination']}%")
+                report += create_info_line("Opis", moon_data["description"])
+                
+                report += f"\n{'═' * 40}\n"
+                report += f"<i>🌙 Obliczenia faz księżyca | {datetime.now().strftime('%H:%M:%S')}</i>"
+                
+                send_telegram_message(chat_id, report)
+            
+            # Komenda /help
             elif text == "/help":
                 help_msg = (
                     f"{create_beautiful_header('POMOC - COSMOS SENTRY v2.0', '❓')}"
@@ -743,22 +1346,7 @@ def webhook():
                 )
                 send_telegram_message(chat_id, help_msg)
             
-            # Pozostałe komendy pozostają bez zmian...
-            elif text.startswith("/astro"):
-                # ... (istniejący kod)
-                pass
-            elif text == "/calendar":
-                # ... (istniejący kod)
-                pass
-            elif text.startswith("/weather"):
-                # ... (istniejący kod)
-                pass
-            elif text.startswith("/forecast"):
-                # ... (istniejący kod)
-                pass
-            elif text == "/moon":
-                # ... (istniejący kod)
-                pass
+            # Domyślna odpowiedź
             else:
                 default_msg = (
                     f"{create_beautiful_header('COSMOS SENTRY v2.0', '🌌')}"
@@ -778,8 +1366,43 @@ def webhook():
         logger.error(f"❌ Błąd przetwarzania webhook: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# ====================== FUNKCJE POMOCNICZE (pozostałe bez zmian) ======================
-# ... (tu pozostają wszystkie istniejące funkcje pomocnicze bez zmian)
+# ====================== PING SYSTEM ======================
+class PingService:
+    """Serwis do utrzymania aktywności aplikacji"""
+    
+    def __init__(self):
+        self.ping_count = 0
+        self.last_ping = None
+        self.is_running = False
+        self.scheduler = BackgroundScheduler()
+    
+    def start(self):
+        """Uruchom pingowanie"""
+        if not self.is_running:
+            print("🔄 Uruchamianie systemu pingowania...")
+            self.scheduler.add_job(self.ping_self, 'interval', seconds=PING_INTERVAL)
+            self.scheduler.start()
+            threading.Thread(target=self.ping_self, daemon=True).start()
+            self.is_running = True
+            print(f"✅ Pingowanie aktywne co {PING_INTERVAL/60} minut")
+    
+    def ping_self(self):
+        """Wyślij ping do własnego endpointu"""
+        try:
+            self.ping_count += 1
+            self.last_ping = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            response = requests.get(f"{RENDER_URL}/", timeout=10)
+            
+            test_data = get_openweather_data(52.2297, 21.0122)
+            
+            logger.info(f"📡 Ping #{self.ping_count} - Status: {response.status_code}")
+            if test_data:
+                logger.info(f"🌤️ OpenWeather: {test_data['temp']:.1f}°C w Warszawie")
+            else:
+                logger.warning("⚠️ OpenWeather API: PROBLEM")
+                
+        except Exception as e:
+            logger.error(f"❌ Błąd pingowania: {e}")
 
 # ====================== URUCHOMIENIE ======================
 if __name__ == "__main__":
@@ -802,10 +1425,16 @@ if __name__ == "__main__":
     test_sat = get_satellite_position(25544, 52.2297, 21.0122)
     if test_sat:
         print(f"✅ N2YO API: AKTYWNE (ISS: {test_sat['lat']:.1f}°, {test_sat['lon']:.1f}°)")
+    else:
+        print(f"⚠️ N2YO API: Może wymagać klucza API")
     
     print("=" * 60)
     print("🚀 System v2.0 uruchomiony pomyślnie!")
     print("=" * 60)
+    
+    # Uruchom pingowanie
+    ping_service = PingService()
+    ping_service.start()
     
     # Uruchom serwer
     app.run(
