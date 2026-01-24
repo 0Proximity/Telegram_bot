@@ -881,7 +881,9 @@ def webhook():
                     forecast = get_openweather_forecast(city["lat"], city["lon"])
                     
                     if forecast:
-                        report = f"{create_beautiful_header(f'PROGNOZA 5-DNIOWA - {city[\"name\"].upper()}', city['emoji'])}"
+                        # POPRAWIAM PROBLEMATYCZNĄ LINIĘ - używam konkatenacji zamiast zagnieżdżonych cudzysłowów
+                        city_name_upper = city["name"].upper()
+                        report = create_beautiful_header(f"PROGNOZA 5-DNIOWA - {city_name_upper}", city['emoji'])
                         
                         # Grupuj prognozę po dniach
                         daily_forecasts = {}
@@ -917,7 +919,9 @@ def webhook():
                     city = OBSERVATION_CITIES[args]
                     alerts = get_openweather_alerts(city["lat"], city["lon"])
                     
-                    report = f"{create_beautiful_header(f'ALERTY POGODOWE - {city[\"name\"].upper()}', '⚠️')}"
+                    # POPRAWIAM PROBLEMATYCZNĄ LINIĘ - używam konkatenacji zamiast zagnieżdżonych cudzysłowów
+                    city_name_upper = city["name"].upper()
+                    report = create_beautiful_header(f"ALERTY POGODOWE - {city_name_upper}", '⚠️')
                     
                     if alerts:
                         for alert in alerts:
