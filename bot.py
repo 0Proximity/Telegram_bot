@@ -76,7 +76,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🐐",
         "dates": "20.01 - 16.02",
         "traits": ["Ambitny", "Praktyczny", "Cierpliwy"],
-        "color": "🌰 Brązowy",
+        "color": "Brązowy",
         "stone": "Granat"
     },
     "aquarius": {
@@ -86,7 +86,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🏺",
         "dates": "17.02 - 18.03",
         "traits": ["Innowacyjny", "Humanitarny", "Niezależny"],
-        "color": "🔵 Niebieski",
+        "color": "Niebieski",
         "stone": "Ametyst"
     },
     "pisces": {
@@ -96,7 +96,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🐟",
         "dates": "19.03 - 17.04",
         "traits": ["Empatyczny", "Intuicyjny", "Artystyczny"],
-        "color": "🟣 Fioletowy",
+        "color": "Fioletowy",
         "stone": "Akwarel"
     },
     "aries": {
@@ -106,7 +106,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🐏",
         "dates": "18.04 - 18.05",
         "traits": ["Odważny", "Dynamiczny", "Zdeterminowany"],
-        "color": "🔴 Czerwony",
+        "color": "Czerwony",
         "stone": "Krwawnik"
     },
     "taurus": {
@@ -116,7 +116,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🐂",
         "dates": "19.05 - 17.06",
         "traits": ["Zdeterminowany", "Wierny", "Zmysłowy"],
-        "color": "🟢 Zielony",
+        "color": "Zielony",
         "stone": "Szmaragd"
     },
     "gemini": {
@@ -126,7 +126,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "👯",
         "dates": "18.06 - 16.07",
         "traits": ["Komunikatywny", "Ciekawy", "Elastyczny"],
-        "color": "🟡 Żółty",
+        "color": "Żółty",
         "stone": "Akwamaryn"
     },
     "cancer": {
@@ -136,7 +136,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🦀",
         "dates": "17.07 - 16.08",
         "traits": ["Troskliwy", "Intuicyjny", "Wrażliwy"],
-        "color": "⚪ Srebrny",
+        "color": "Srebrny",
         "stone": "Perła"
     },
     "leo": {
@@ -146,7 +146,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🦁",
         "dates": "17.08 - 15.09",
         "traits": ["Kreatywny", "Hojny", "Ciepły"],
-        "color": "🟠 Pomarańczowy",
+        "color": "Pomarańczowy",
         "stone": "Rubin"
     },
     "virgo": {
@@ -156,7 +156,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🌾",
         "dates": "16.09 - 15.10",
         "traits": ["Analityczny", "Praktyczny", "Skrupulatny"],
-        "color": "🟤 Brązowy",
+        "color": "Brązowy",
         "stone": "Sapphir"
     },
     "libra": {
@@ -166,7 +166,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "⚖️",
         "dates": "16.10 - 15.11",
         "traits": ["Dyplomatyczny", "Sprawiedliwy", "Społeczny"],
-        "color": "🔷 Niebieski",
+        "color": "Niebieski",
         "stone": "Opal"
     },
     "scorpio": {
@@ -176,7 +176,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🦂",
         "dates": "16.11 - 28.11",
         "traits": ["Namiętny", "Zdeterminowany", "Intensywny"],
-        "color": "⚫ Czarny",
+        "color": "Czarny",
         "stone": "Topaz"
     },
     "ophiuchus": {
@@ -186,7 +186,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🐍",
         "dates": "29.11 - 17.12",
         "traits": ["Uzdrowiciel", "Mądry", "Tajemniczy"],
-        "color": "🟣 Purpurowy",
+        "color": "Purpurowy",
         "stone": "Szafir"
     },
     "sagittarius": {
@@ -196,7 +196,7 @@ ASTRONOMICAL_CALENDAR = {
         "emoji": "🏹",
         "dates": "18.12 - 19.01",
         "traits": ["Optymistyczny", "Przygodowy", "Szczery"],
-        "color": "🟣 Fioletowy",
+        "color": "Fioletowy",
         "stone": "Turkus"
     }
 }
@@ -241,7 +241,7 @@ def get_openweather_data(lat, lon):
             "wind_speed": data["wind"]["speed"],
             "wind_deg": data["wind"].get("deg", 0),
             "clouds": data["clouds"]["all"],
-            "visibility": data.get("visibility", 10000) / 1000,
+            "visibility": data.get("visibility", 10000) / 1000,  # m -> km
             "description": data["weather"][0]["description"],
             "weather_main": data["weather"][0]["main"],
             "icon": data["weather"][0]["icon"],
@@ -332,11 +332,11 @@ def calculate_moon_phase():
     phases = [
         (0.0, "🌑 Nów", "Księżyc niewidoczny", 0),
         (0.25, "🌒 Rosnący sierp", "Widoczny wieczorem", 25),
-        (0.5, "🌓 Pierwsza kwadra", "Widoczny połowę", 50),
+        (0.5, "🌓 Pierwsza kwadra", "Połowa widoczna", 50),
         (0.75, "🌔 Ubywający garbaty", "Prawie pełny", 75),
         (1.0, "🌕 Pełnia", "Cały widoczny", 100),
         (1.25, "🌖 Malejący garbaty", "Prawie pełny", 75),
-        (1.5, "🌗 Ostatnia kwadra", "Widoczny połowę", 50),
+        (1.5, "🌗 Ostatnia kwadra", "Połowa widoczna", 50),
         (1.75, "🌘 Malejący sierp", "Widoczny rano", 25)
     ]
     
@@ -464,427 +464,6 @@ def create_progress_bar(value, max_value=100, length=10):
     empty = length - filled
     return "█" * filled + "░" * empty
 
-# ====================== FLASK APP ======================
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    """Strona główna z pięknym interfejsem"""
-    now = datetime.now()
-    
-    html = '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🌌 COSMOS SENTRY v1.0</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap');
-            
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
-            body {
-                font-family: 'Exo 2', sans-serif;
-                background: linear-gradient(135deg, #0c0e2e 0%, #1a1b3e 50%, #2a2b5e 100%);
-                color: #ffffff;
-                min-height: 100vh;
-                overflow-x: hidden;
-                position: relative;
-            }
-            
-            body::before {
-                content: '';
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: 
-                    radial-gradient(circle at 20% 30%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
-                    radial-gradient(circle at 80% 70%, rgba(255, 119, 198, 0.2) 0%, transparent 50%);
-                z-index: -1;
-            }
-            
-            .stars {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                pointer-events: none;
-                z-index: -1;
-            }
-            
-            .star {
-                position: absolute;
-                background: white;
-                border-radius: 50%;
-                animation: twinkle 3s infinite;
-            }
-            
-            @keyframes twinkle {
-                0%, 100% { opacity: 0.3; }
-                50% { opacity: 1; }
-            }
-            
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-                padding: 20px;
-                position: relative;
-                z-index: 1;
-            }
-            
-            .header {
-                text-align: center;
-                padding: 60px 20px;
-                background: rgba(255, 255, 255, 0.05);
-                backdrop-filter: blur(10px);
-                border-radius: 30px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                margin-bottom: 40px;
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .header::before {
-                content: '';
-                position: absolute;
-                top: -50%;
-                left: -50%;
-                width: 200%;
-                height: 200%;
-                background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
-                animation: shine 6s infinite;
-            }
-            
-            @keyframes shine {
-                0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
-                100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
-            }
-            
-            .title {
-                font-family: 'Orbitron', sans-serif;
-                font-size: 4.5rem;
-                font-weight: 900;
-                background: linear-gradient(45deg, #00dbde, #fc00ff, #00dbde);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
-                text-shadow: 0 0 30px rgba(0, 219, 222, 0.5);
-                margin-bottom: 20px;
-                letter-spacing: 2px;
-            }
-            
-            .subtitle {
-                font-size: 1.5rem;
-                color: #a0a0ff;
-                margin-bottom: 30px;
-                font-weight: 300;
-            }
-            
-            .status-badge {
-                display: inline-block;
-                padding: 12px 30px;
-                background: linear-gradient(45deg, #00b09b, #96c93d);
-                border-radius: 25px;
-                font-weight: 600;
-                font-size: 1.2rem;
-                margin: 20px 0;
-                box-shadow: 0 5px 20px rgba(0, 176, 155, 0.3);
-                animation: pulse 2s infinite;
-            }
-            
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.05); }
-                100% { transform: scale(1); }
-            }
-            
-            .date-display {
-                font-size: 1.8rem;
-                color: #ffcc00;
-                margin: 30px 0;
-                text-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
-            }
-            
-            .features-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 25px;
-                margin: 40px 0;
-            }
-            
-            .feature-card {
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 20px;
-                padding: 30px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                transition: all 0.3s ease;
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .feature-card:hover {
-                transform: translateY(-10px);
-                background: rgba(255, 255, 255, 0.1);
-                border-color: rgba(255, 255, 255, 0.3);
-                box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
-            }
-            
-            .feature-card::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 3px;
-                background: linear-gradient(90deg, #00dbde, #fc00ff);
-            }
-            
-            .feature-icon {
-                font-size: 3rem;
-                margin-bottom: 20px;
-            }
-            
-            .feature-title {
-                font-size: 1.5rem;
-                margin-bottom: 15px;
-                color: #00dbde;
-            }
-            
-            .feature-desc {
-                color: #b0b0ff;
-                line-height: 1.6;
-            }
-            
-            .cta-button {
-                display: inline-block;
-                padding: 18px 40px;
-                background: linear-gradient(45deg, #667eea, #764ba2);
-                color: white;
-                text-decoration: none;
-                border-radius: 15px;
-                font-size: 1.3rem;
-                font-weight: 600;
-                margin: 30px 10px;
-                transition: all 0.3s ease;
-                box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
-                border: none;
-                cursor: pointer;
-            }
-            
-            .cta-button:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 15px 35px rgba(102, 126, 234, 0.6);
-                background: linear-gradient(45deg, #764ba2, #667eea);
-            }
-            
-            .button-group {
-                display: flex;
-                justify-content: center;
-                flex-wrap: wrap;
-                gap: 20px;
-                margin: 40px 0;
-            }
-            
-            .footer {
-                text-align: center;
-                margin-top: 60px;
-                padding-top: 30px;
-                border-top: 1px solid rgba(255, 255, 255, 0.1);
-                color: #8888cc;
-                font-size: 0.9rem;
-            }
-            
-            .api-status {
-                display: inline-flex;
-                align-items: center;
-                gap: 10px;
-                padding: 8px 20px;
-                background: rgba(0, 255, 0, 0.1);
-                border-radius: 20px;
-                margin: 5px;
-                border: 1px solid rgba(0, 255, 0, 0.3);
-            }
-            
-            @media (max-width: 768px) {
-                .title {
-                    font-size: 3rem;
-                }
-                
-                .container {
-                    padding: 10px;
-                }
-                
-                .button-group {
-                    flex-direction: column;
-                    align-items: center;
-                }
-                
-                .cta-button {
-                    width: 100%;
-                    max-width: 300px;
-                    margin: 10px 0;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="stars" id="stars"></div>
-        
-        <div class="container">
-            <div class="header">
-                <h1 class="title">🌌 COSMOS SENTRY</h1>
-                <div class="subtitle">Zaawansowany System Astrometeorologiczny</div>
-                <div class="status-badge">🟢 SYSTEM AKTYWNY | v1.0</div>
-                <div class="date-display" id="currentDate"></div>
-                
-                <div style="margin: 30px 0;">
-                    <span class="api-status">🌤️ OpenWeather: AKTYWNE</span>
-                    <span class="api-status">🛰️ NASA API: AKTYWNE</span>
-                    <span class="api-status">🌌 Kalendarz 13-miesięczny</span>
-                </div>
-            </div>
-            
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">🌠</div>
-                    <h3 class="feature-title">Astro Prognoza</h3>
-                    <p class="feature-desc">Zaawansowana analiza warunków obserwacyjnych z OpenWeather API</p>
-                </div>
-                
-                <div class="feature-card">
-                    <div class="feature-icon">📅</div>
-                    <h3 class="feature-title">Kalendarz 13-miesięczny</h3>
-                    <p class="feature-desc">Unikalny system daty astronomicznej z pełną symboliką</p>
-                </div>
-                
-                <div class="feature-card">
-                    <div class="feature-icon">🌙</div>
-                    <h3 class="feature-title">Fazy Księżyca</h3>
-                    <p class="feature-desc">Precyzyjne obliczenia faz księżycowych i oświetlenia</p>
-                </div>
-                
-                <div class="feature-card">
-                    <div class="feature-icon">🛰️</div>
-                    <h3 class="feature-title">Śledzenie Satelitów</h3>
-                    <p class="feature-desc">Monitorowanie ISS i innych satelitów w czasie rzeczywistym</p>
-                </div>
-            </div>
-            
-            <div class="button-group">
-                <a href="https://t.me/PcSentintel_Bot" target="_blank" class="cta-button">
-                    💬 Otwórz bota w Telegram
-                </a>
-                <a href="/api/status" class="cta-button">
-                    📊 Status API
-                </a>
-                <a href="/demo" class="cta-button">
-                    🌟 Demo raportu
-                </a>
-            </div>
-            
-            <div class="footer">
-                <p>🌌 COSMOS SENTRY v1.0 | Zaawansowany System Astrometeorologiczny</p>
-                <p>API: OpenWeather • NASA • N2YO Satellites • Open-Meteo</p>
-                <p id="timestamp"></p>
-            </div>
-        </div>
-        
-        <script>
-            // Generuj gwiazdy
-            function createStars() {
-                const starsContainer = document.getElementById('stars');
-                const starCount = 150;
-                
-                for (let i = 0; i < starCount; i++) {
-                    const star = document.createElement('div');
-                    star.className = 'star';
-                    
-                    const size = Math.random() * 3 + 1;
-                    const x = Math.random() * 100;
-                    const y = Math.random() * 100;
-                    const delay = Math.random() * 3;
-                    
-                    star.style.width = `${size}px`;
-                    star.style.height = `${size}px`;
-                    star.style.left = `${x}%`;
-                    star.style.top = `${y}%`;
-                    star.style.animationDelay = `${delay}s`;
-                    
-                    starsContainer.appendChild(star);
-                }
-            }
-            
-            // Aktualizuj datę i czas
-            function updateDateTime() {
-                const now = new Date();
-                const dateStr = now.toLocaleDateString('pl-PL', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-                
-                document.getElementById('currentDate').textContent = dateStr;
-                document.getElementById('timestamp').textContent = 
-                    `Ostatnia aktualizacja: ${now.toLocaleTimeString('pl-PL')}`;
-            }
-            
-            // Inicjalizacja
-            document.addEventListener('DOMContentLoaded', () => {
-                createStars();
-                updateDateTime();
-                setInterval(updateDateTime, 1000);
-            });
-        </script>
-    </body>
-    </html>
-    '''
-    return html
-
-# ====================== TELEGRAM FUNCTIONS ======================
-def send_telegram_message(chat_id, text):
-    """Wyślij wiadomość przez Telegram API"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
-    except Exception as e:
-        logger.error(f"❌ Błąd wysyłania wiadomości: {e}")
-        return None
-
-def send_telegram_photo(chat_id, photo_url, caption=""):
-    """Wyślij zdjęcie przez Telegram API"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    payload = {
-        "chat_id": chat_id,
-        "photo": photo_url,
-        "caption": caption,
-        "parse_mode": "HTML"
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
-    except Exception as e:
-        logger.error(f"❌ Błąd wysyłania zdjęcia: {e}")
-        return None
-
 # ====================== FORMATOWANIE WIADOMOŚCI ======================
 def create_beautiful_header(title, emoji="🌌"):
     """Twórz piękny nagłówek wiadomości"""
@@ -904,14 +483,6 @@ def create_progress_display(label, value, max_value=100):
     bar = create_progress_bar(value, max_value)
     percent = (value / max_value) * 100
     return f"• <b>{label}:</b> {bar} {value}/{max_value} ({percent:.0f}%)\n"
-
-def create_rating_stars(rating, max_stars=5):
-    """Twórz ocenę w gwiazdkach"""
-    full_star = "⭐"
-    empty_star = "☆"
-    full_count = int(rating)
-    empty_count = max_stars - full_count
-    return full_star * full_count + empty_star * empty_count
 
 # ====================== GENEROWANIE RAPORTÓW ======================
 def generate_full_astro_report(city_key):
@@ -1093,6 +664,147 @@ def generate_calendar_report():
     report += f"<i>🌌 System daty astronomicznej | COSMOS SENTRY v1.0</i>"
     
     return report
+
+# ====================== FLASK APP ======================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    """Strona główna"""
+    now = datetime.now()
+    
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🌌 COSMOS SENTRY v1.0</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+                background: linear-gradient(135deg, #0c0e2e 0%, #1a1b3e 50%, #2a2b5e 100%);
+                color: white;
+                min-height: 100vh;
+            }}
+            .container {{
+                background: rgba(255, 255, 255, 0.05);
+                backdrop-filter: blur(10px);
+                border-radius: 20px;
+                padding: 30px;
+                margin-top: 20px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }}
+            .header {{
+                text-align: center;
+                margin-bottom: 40px;
+            }}
+            .title {{
+                font-size: 48px;
+                font-weight: bold;
+                background: linear-gradient(45deg, #00dbde, #fc00ff);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                margin-bottom: 10px;
+            }}
+            .status-badge {{
+                display: inline-block;
+                padding: 10px 20px;
+                background: linear-gradient(45deg, #00b09b, #96c93d);
+                border-radius: 20px;
+                margin: 20px 0;
+                font-weight: bold;
+            }}
+            .features-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 20px;
+                margin: 40px 0;
+            }}
+            .feature-card {{
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 15px;
+                padding: 20px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                transition: transform 0.3s;
+            }}
+            .feature-card:hover {{
+                transform: translateY(-5px);
+                background: rgba(255, 255, 255, 0.15);
+            }}
+            .cta-button {{
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                color: white;
+                padding: 15px 30px;
+                border-radius: 10px;
+                text-decoration: none;
+                display: inline-block;
+                margin: 10px;
+                font-weight: bold;
+                font-size: 18px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1 class="title">🌌 COSMOS SENTRY v1.0</h1>
+                <h2 style="color: #81ecec;">Zaawansowany System Astrometeorologiczny</h2>
+                <div class="status-badge">🟢 SYSTEM AKTYWNY | OpenWeather API</div>
+                <h2>📅 {now.strftime("%d.%m.%Y %H:%M")}</h2>
+            </div>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <h3>🌠 Astro Prognoza</h3>
+                    <p>Zaawansowana analiza warunków obserwacyjnych z OpenWeather API</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📅 Kalendarz 13-miesięczny</h3>
+                    <p>Unikalny system daty astronomicznej z pełną symboliką</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🌙 Fazy Księżyca</h3>
+                    <p>Precyzyjne obliczenia faz księżycowych i oświetlenia</p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin: 40px 0;">
+                <a href="https://t.me/PcSentintel_Bot" target="_blank" class="cta-button">
+                    💬 Otwórz bota w Telegram
+                </a>
+            </div>
+            
+            <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.3);">
+                <p>🌌 COSMOS SENTRY v1.0 | Zaawansowany System Astrometeorologiczny</p>
+                <p>API: OpenWeather • NASA • N2YO Satellites</p>
+                <p>{now.strftime("%Y-%m-%d %H:%M:%S")}</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+    return html
+
+# ====================== TELEGRAM FUNCTIONS ======================
+def send_telegram_message(chat_id, text):
+    """Wyślij wiadomość przez Telegram API"""
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ Błąd wysyłania wiadomości: {e}")
+        return None
 
 # ====================== TELEGRAM WEBHOOK ======================
 @app.route('/webhook', methods=['POST'])
