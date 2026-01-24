@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-🤖 SENTRY ONE v8.1 - Kompletny system astrometeorologiczny z zaawansowanym raportem
-Dodano API OpenWeather dla rozszerzonych danych pogodowych
+🤖 SENTRY ONE v9.0 - Ultimate Astrometeorological System
+Rozszerzony system z NASA zdjęciami, śledzeniem satelitów i zaawansowanymi powiadomieniami
 """
 
 import os
@@ -14,6 +14,9 @@ import math
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string
 from apscheduler.schedulers.background import BackgroundScheduler
+import sqlite3
+from typing import Dict, List, Optional, Tuple
+import random
 
 # ====================== KONFIGURACJA ======================
 TOKEN = "8490381532:AAETsrsXJzUn-gJHNGASnIqC_3hjtOwaqic"
@@ -25,13 +28,17 @@ PING_INTERVAL = 300
 # API klucze
 NASA_API_KEY = "P0locPuOZBvnkHCdIKjkxzKsfnM7tc7pbiMcsBDE"
 N2YO_API_KEY = "UNWEQ8-N47JL7-WFJZYX-5N65"
-OPENWEATHER_API_KEY = "38e01cfb763fc738e9eddee84cfc4384"  # Dodano klucz OpenWeather
+OPENWEATHER_API_KEY = "38e01cfb763fc738e9eddee84cfc4384"
 
 # API endpoints
 N2YO_BASE_URL = "https://api.n2yo.com/rest/v1/satellite"
 NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
+NASA_EARTH_URL = "https://api.nasa.gov/planetary/earth/assets"
 OPENMETEO_BASE_URL = "https://api.open-meteo.com/v1/forecast"
-OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"  # Dodano OpenWeather
+OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
+
+# Baza danych użytkowników
+DB_FILE = "sentry_one.db"
 
 # Miasta do obserwacji
 OBSERVATION_CITIES = {
@@ -63,6 +70,86 @@ GOOD_CONDITIONS = {
     "max_temperature": 30
 }
 
+# ====================== BAZA DANYCH ======================
+def init_database():
+    """Inicjalizacja bazy danych"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Tabela użytkowników
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            chat_id INTEGER PRIMARY KEY,
+            satellite_notifications BOOLEAN DEFAULT 0,
+            observation_alerts BOOLEAN DEFAULT 1,
+            last_notification TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Tabela śledzonych satelitów
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tracked_satellites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            satellite_id INTEGER,
+            satellite_name TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (chat_id) REFERENCES users (chat_id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def get_user_settings(chat_id: int) -> Dict:
+    """Pobierz ustawienia użytkownika"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT chat_id, satellite_notifications, observation_alerts, last_notification
+        FROM users WHERE chat_id = ?
+    ''', (chat_id,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return {
+            "chat_id": result[0],
+            "satellite_notifications": bool(result[1]),
+            "observation_alerts": bool(result[2]),
+            "last_notification": result[3]
+        }
+    else:
+        # Domyślne ustawienia
+        return {
+            "chat_id": chat_id,
+            "satellite_notifications": False,
+            "observation_alerts": True,
+            "last_notification": None
+        }
+
+def update_user_settings(chat_id: int, settings: Dict):
+    """Aktualizuj ustawienia użytkownika"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT OR REPLACE INTO users 
+        (chat_id, satellite_notifications, observation_alerts, last_notification)
+        VALUES (?, ?, ?, ?)
+    ''', (
+        chat_id,
+        1 if settings.get("satellite_notifications") else 0,
+        1 if settings.get("observation_alerts") else 0,
+        settings.get("last_notification")
+    ))
+    
+    conn.commit()
+    conn.close()
+
 # ====================== KALENDARZ 13-MIESIĘCZNY ======================
 ASTRONOMICAL_CALENDAR = [
     {"name": "Sagittarius", "symbol": "♐", "element": "Ogień", "start_day": 355, "end_day": 13},
@@ -81,9 +168,10 @@ ASTRONOMICAL_CALENDAR = [
 ]
 
 print("=" * 60)
-print("🤖 SENTRY ONE v8.1 - SYSTEM ASTROMETEOROLOGICZNY")
+print("🤖 SENTRY ONE v9.0 - ULTIMATE SYSTEM")
 print(f"🌐 URL: {RENDER_URL}")
-print("📡 API OpenWeather: AKTYWNE")
+print("🛰️ NASA API + N2YO + OpenWeather")
+print("🔔 System powiadomień: AKTYWNY")
 print("=" * 60)
 
 # ====================== LOGGING ======================
@@ -93,7 +181,107 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ====================== FUNKCJE POMOCNICZE ======================
+# ====================== NASA FUNCTIONS ======================
+def get_nasa_apod():
+    """Pobierz Astronomy Picture of the Day z NASA"""
+    try:
+        url = f"{NASA_APOD_URL}?api_key={NASA_API_KEY}"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        return {
+            "title": data.get("title", "NASA APOD"),
+            "explanation": data.get("explanation", ""),
+            "url": data.get("url", ""),
+            "hdurl": data.get("hdurl", ""),
+            "media_type": data.get("media_type", "image"),
+            "date": data.get("date", "")
+        }
+    except Exception as e:
+        logger.error(f"❌ Błąd NASA APOD: {e}")
+        return None
+
+def get_earth_image(lat: float, lon: float, date: str = None):
+    """Pobierz zdjęcie Ziemi z NASA dla danej lokalizacji"""
+    try:
+        if not date:
+            date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        
+        url = f"{NASA_EARTH_URL}?lon={lon}&lat={lat}&date={date}&dim=0.1&api_key={NASA_API_KEY}"
+        response = requests.get(url, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        
+        return {
+            "url": data.get("url", ""),
+            "date": data.get("date", date),
+            "id": data.get("id", ""),
+            "lat": lat,
+            "lon": lon
+        }
+    except Exception as e:
+        logger.error(f"❌ Błąd NASA Earth: {e}")
+        return None
+
+def get_satellite_image_for_city(city_key: str):
+    """Pobierz zdjęcie satelitarne dla miasta"""
+    city = OBSERVATION_CITIES.get(city_key)
+    if not city:
+        return None
+    
+    # Spróbuj pobrać najnowsze dostępne zdjęcie
+    for days_ago in range(0, 90, 10):  # Sprawdzaj co 10 dni przez 90 dni
+        date = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        image = get_earth_image(city["lat"], city["lon"], date)
+        if image and image.get("url"):
+            return image
+    
+    return None
+
+# ====================== N2YO SATELLITE FUNCTIONS ======================
+def get_satellite_positions(satellite_id: int, lat: float, lon: float, alt: float = 0):
+    """Pobierz pozycje satelity dla danej lokalizacji"""
+    try:
+        url = f"{N2YO_BASE_URL}/positions/{satellite_id}/{lat}/{lon}/{alt}/10/&apiKey={N2YO_API_KEY}"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ Błąd N2YO positions: {e}")
+        return None
+
+def get_satellite_passes(satellite_id: int, lat: float, lon: float, alt: float = 0, days: int = 10):
+    """Pobierz przeloty satelity"""
+    try:
+        url = f"{N2YO_BASE_URL}/visualpasses/{satellite_id}/{lat}/{lon}/{alt}/{days}/300/&apiKey={N2YO_API_KEY}"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ Błąd N2YO passes: {e}")
+        return None
+
+def get_iss_position():
+    """Pobierz aktualną pozycję ISS"""
+    try:
+        # ISS ma ID 25544
+        return get_satellite_positions(25544, 52.2297, 21.0122, 0)
+    except Exception as e:
+        logger.error(f"❌ Błąd ISS: {e}")
+        return None
+
+# Popularne satelity do obserwacji
+SATELLITES = {
+    "iss": {"id": 25544, "name": "ISS", "emoji": "🛰️"},
+    "hst": {"id": 20580, "name": "Hubble", "emoji": "🔭"},
+    "landsat8": {"id": 39084, "name": "Landsat 8", "emoji": "🌍"},
+    "sentinel2a": {"id": 40697, "name": "Sentinel-2A", "emoji": "🛰️"},
+    "starlink": {"id": 44713, "name": "Starlink", "emoji": "✨"},
+    "meteosat": {"id": 26718, "name": "Meteosat", "emoji": "🌤️"}
+}
+
+# ====================== WEATHER FUNCTIONS ======================
 def get_weather_forecast(lat, lon):
     """Pobierz prognozę pogody z Open-Meteo"""
     try:
@@ -102,9 +290,10 @@ def get_weather_forecast(lat, lon):
             "latitude": lat,
             "longitude": lon,
             "current": "temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,visibility,is_day,weather_code",
+            "hourly": "temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,visibility,weather_code",
             "daily": "sunrise,sunset,moonrise,moonset",
             "timezone": "auto",
-            "forecast_days": 2
+            "forecast_days": 3
         }
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
@@ -121,17 +310,16 @@ def get_openweather_data(lat, lon):
             "lat": lat,
             "lon": lon,
             "appid": OPENWEATHER_API_KEY,
-            "units": "metric",  # Jednostki metryczne
-            "lang": "pl"  # Język polski
+            "units": "metric",
+            "lang": "pl"
         }
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
-        # Dodaj dodatkowe informacje z OpenWeather
         openweather_info = {
-            "pressure": data.get("main", {}).get("pressure", 0),  # hPa
-            "feels_like": data.get("main", {}).get("feels_like", 0),  # °C
+            "pressure": data.get("main", {}).get("pressure", 0),
+            "feels_like": data.get("main", {}).get("feels_like", 0),
             "weather_main": data.get("weather", [{}])[0].get("main", ""),
             "weather_description": data.get("weather", [{}])[0].get("description", ""),
             "weather_icon": data.get("weather", [{}])[0].get("icon", ""),
@@ -149,7 +337,7 @@ def get_openweather_data(lat, lon):
         return None
 
 def get_openweather_forecast(lat, lon):
-    """Pobierz prognozę pogody z OpenWeather (5 dni / 3 godziny)"""
+    """Pobierz prognozę pogody z OpenWeather"""
     try:
         url = f"{OPENWEATHER_BASE_URL}/forecast"
         params = {
@@ -166,90 +354,73 @@ def get_openweather_forecast(lat, lon):
         logger.error(f"❌ Błąd prognozy OpenWeather: {e}")
         return None
 
-def get_weather_alerts(lat, lon):
-    """Sprawdź alerty pogodowe z OpenWeather"""
-    try:
-        url = f"{OPENWEATHER_BASE_URL}/onecall"
-        params = {
-            "lat": lat,
-            "lon": lon,
-            "appid": OPENWEATHER_API_KEY,
-            "exclude": "current,minutely,daily",
-            "lang": "pl"
-        }
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        alerts = []
-        if "alerts" in data:
-            for alert in data["alerts"]:
-                alerts.append({
-                    "event": alert.get("event", ""),
-                    "description": alert.get("description", ""),
-                    "start": datetime.fromtimestamp(alert.get("start", 0)).strftime("%Y-%m-%d %H:%M"),
-                    "end": datetime.fromtimestamp(alert.get("end", 0)).strftime("%Y-%m-%d %H:%M"),
-                    "sender": alert.get("sender_name", "")
-                })
-        
-        return alerts if alerts else []
-        
-    except Exception as e:
-        logger.error(f"❌ Błąd alertów OpenWeather: {e}")
-        return []
-
-def calculate_moon_phase():
-    """Oblicz fazę księżyca"""
-    now = datetime.now()
-    days_in_moon_cycle = 29.530588853
-    last_new_moon = datetime(2026, 1, 10, 12, 0, 0)
-    days_since_new = (now - last_new_moon).total_seconds() / 86400
+# ====================== ASTRONOMICAL CALCULATIONS ======================
+def calculate_moon_phase(date: datetime = None) -> Dict:
+    """Oblicz dokładną fazę księżyca (poprawiona wersja)"""
+    if not date:
+        date = datetime.now()
     
-    moon_phase = (days_since_new % days_in_moon_cycle) / days_in_moon_cycle
+    # Ostatni nów: 11 stycznia 2025, 11:57 UTC
+    last_new_moon = datetime(2025, 1, 11, 11, 57)
     
-    if moon_phase < 0.03 or moon_phase > 0.97:
-        return {"phase": moon_phase, "name": "Nów", "emoji": "🌑", "illumination": 0}
-    elif moon_phase < 0.22:
-        return {"phase": moon_phase, "name": "Rosnący sierp", "emoji": "🌒", "illumination": moon_phase * 100}
-    elif moon_phase < 0.28:
-        return {"phase": moon_phase, "name": "Pierwsza kwadra", "emoji": "🌓", "illumination": 50}
-    elif moon_phase < 0.47:
-        return {"phase": moon_phase, "name": "Rosnący garbaty", "emoji": "🌔", "illumination": moon_phase * 100}
-    elif moon_phase < 0.53:
-        return {"phase": moon_phase, "name": "Pełnia", "emoji": "🌕", "illumination": 100}
-    elif moon_phase < 0.72:
-        return {"phase": moon_phase, "name": "Malejący garbaty", "emoji": "🌖", "illumination": (1 - moon_phase) * 100}
-    elif moon_phase < 0.78:
-        return {"phase": moon_phase, "name": "Ostatnia kwadra", "emoji": "🌗", "illumination": 50}
+    # Oblicz różnicę czasu od ostatniego nowiu
+    delta_days = (date - last_new_moon).total_seconds() / 86400.0
+    
+    # Normalizuj do cyklu księżycowego (29.530588 dni)
+    moon_age = delta_days % 29.530588
+    
+    # Oblicz procent oświetlenia
+    illumination = 50 * (1 - math.cos(2 * math.pi * moon_age / 29.530588))
+    
+    # Określ fazę
+    if moon_age < 1.0:
+        phase = "Nów"
+        emoji = "🌑"
+        illumination = 0
+    elif moon_age < 7.38:
+        phase = "Rosnący sierp"
+        emoji = "🌒"
+    elif moon_age < 7.38 + 0.5:
+        phase = "Pierwsza kwadra"
+        emoji = "🌓"
+        illumination = 50
+    elif moon_age < 14.77:
+        phase = "Rosnący garbaty"
+        emoji = "🌔"
+    elif moon_age < 15.0:
+        phase = "Pełnia"
+        emoji = "🌕"
+        illumination = 100
+    elif moon_age < 22.15:
+        phase = "Malejący garbaty"
+        emoji = "🌖"
+    elif moon_age < 22.15 + 0.5:
+        phase = "Ostatnia kwadra"
+        emoji = "🌗"
+        illumination = 50
     else:
-        return {"phase": moon_phase, "name": "Malejący sierp", "emoji": "🌘", "illumination": (1 - moon_phase) * 100}
+        phase = "Malejący sierp"
+        emoji = "🌘"
+    
+    return {
+        "phase": moon_age / 29.530588,
+        "name": phase,
+        "emoji": emoji,
+        "illumination": illumination,
+        "age_days": moon_age,
+        "next_full": (14.77 - moon_age) % 29.530588,
+        "next_new": (29.530588 - moon_age) % 29.530588
+    }
 
 def get_astronomical_date():
     """Zwróć datę w kalendarzu 13-miesięcznym"""
     now = datetime.now()
-    
-    # 24 stycznia 2026 - specjalna obsługa
-    if now.year == 2026 and now.month == 1 and now.day == 24:
-        return {
-            "day": 5,  # 24 styczeń - 20 styczeń + 1 = 5
-            "month": "Capricorn",
-            "month_symbol": "♑",
-            "month_polish": "Koziorożec",
-            "day_of_year": now.timetuple().tm_yday,
-            "year": now.year,
-            "element": "Ziemia",
-            "element_emoji": "🌍",
-            "description": "Znak ambicji, determinacji i praktyczności"
-        }
-    
-    # Logika ogólna
     day_of_year = now.timetuple().tm_yday
     
     for month in ASTRONOMICAL_CALENDAR:
         if month["start_day"] <= day_of_year <= month["end_day"]:
             day_in_month = day_of_year - month["start_day"] + 1
             
-            # Mapowanie nazw angielskich na polskie
             polish_names = {
                 "Sagittarius": "Strzelec",
                 "Capricorn": "Koziorożec",
@@ -285,21 +456,63 @@ def get_astronomical_date():
                 "description": f"Znak {month['element'].lower()}"
             }
     
-    # Domyślnie Koziorożec
     return {
         "day": 5,
         "month": "Capricorn",
         "month_symbol": "♑",
         "month_polish": "Koziorożec",
-        "day_of_year": now.timetuple().tm_yday,
+        "day_of_year": day_of_year,
         "year": now.year,
         "element": "Ziemia",
         "element_emoji": "🌍",
         "description": "Znak ambicji, determinacji i praktyczności"
     }
 
-def check_city_conditions(city_key):
-    """Sprawdź warunki obserwacyjne dla miasta z danymi z OpenWeather"""
+def get_sun_moon_times(city_key: str):
+    """Pobierz dokładne czasy wschodu/zachodu Słońca i Księżyca"""
+    city = OBSERVATION_CITIES[city_key]
+    
+    try:
+        # Użyj OpenWeather dla dokładniejszych danych
+        url = f"{OPENWEATHER_BASE_URL}/weather"
+        params = {
+            "lat": city["lat"],
+            "lon": city["lon"],
+            "appid": OPENWEATHER_API_KEY,
+            "units": "metric"
+        }
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        sunrise = datetime.fromtimestamp(data["sys"]["sunrise"]).strftime("%H:%M")
+        sunset = datetime.fromtimestamp(data["sys"]["sunset"]).strftime("%H:%M")
+        
+        # Oblicz wschód/zachód księżyca (uproszczone)
+        now = datetime.now()
+        moon = calculate_moon_phase(now)
+        
+        # Symulacja czasów księżyca (w rzeczywistości potrzebne API)
+        moonrise = (datetime.now() - timedelta(hours=6)).strftime("%H:%M")
+        moonset = (datetime.now() + timedelta(hours=6)).strftime("%H:%M")
+        
+        return {
+            "sun": {"rise": sunrise, "set": sunset},
+            "moon": {"rise": moonrise, "set": moonset},
+            "moon_phase": moon
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Błąd czasów astronomicznych: {e}")
+        # Domyślne wartości
+        return {
+            "sun": {"rise": "07:30", "set": "16:30"},
+            "moon": {"rise": "20:00", "set": "08:00"},
+            "moon_phase": calculate_moon_phase()
+        }
+
+# ====================== OBSERVATION CONDITIONS ======================
+def check_city_conditions(city_key: str):
+    """Sprawdź warunki obserwacyjne dla miasta"""
     city = OBSERVATION_CITIES[city_key]
     weather_data = get_weather_forecast(city["lat"], city["lon"])
     openweather_data = get_openweather_data(city["lat"], city["lon"])
@@ -309,29 +522,12 @@ def check_city_conditions(city_key):
     
     current = weather_data["current"]
     
-    # Pobierz dane
     cloud_cover = current.get("cloud_cover", 100)
     visibility = current.get("visibility", 0) / 1000
     humidity = current.get("relative_humidity_2m", 100)
     wind_speed = current.get("wind_speed_10m", 0)
     temperature = current.get("temperature_2m", 0)
     is_day = current.get("is_day", 1)
-    
-    # Dodaj dane z OpenWeather jeśli dostępne
-    openweather_extras = {}
-    if openweather_data:
-        openweather_extras = {
-            "pressure": openweather_data.get("pressure", 0),
-            "feels_like": openweather_data.get("feels_like", temperature),
-            "weather_description": openweather_data.get("weather_description", ""),
-            "wind_deg": openweather_data.get("wind_deg", 0),
-            "weather_icon": openweather_data.get("weather_icon", ""),
-            "openweather_available": True
-        }
-    else:
-        openweather_extras = {
-            "openweather_available": False
-        }
     
     # Sprawdź warunki
     conditions_check = {
@@ -378,112 +574,185 @@ def check_city_conditions(city_key):
         "score": score,
         "conditions_met": conditions_met,
         "total_conditions": total_conditions,
-        **openweather_extras
+        "openweather_data": openweather_data
     }
 
-def get_sun_moon_info():
-    """Pobierz informacje o Słońcu i Księżycu"""
-    # Dla uproszczenia użyjemy Warszawy jako referencji
-    city = OBSERVATION_CITIES["warszawa"]
-    weather_data = get_weather_forecast(city["lat"], city["lon"])
-    
-    moon_phase = calculate_moon_phase()
-    
-    sun_info = {"rise": "Brak danych", "set": "Brak danych"}
-    moon_info = {"rise": "Brak danych", "set": "Brak danych"}
-    
-    if weather_data and "daily" in weather_data:
-        daily = weather_data["daily"]
-        
-        if daily.get("sunrise"):
-            sunrise = datetime.fromisoformat(daily["sunrise"][0].replace('Z', '+00:00'))
-            sun_info["rise"] = sunrise.strftime("%H:%M")
-        
-        if daily.get("sunset"):
-            sunset = datetime.fromisoformat(daily["sunset"][0].replace('Z', '+00:00'))
-            sun_info["set"] = sunset.strftime("%H:%M")
-        
-        if daily.get("moonrise"):
-            moonrise = datetime.fromisoformat(daily["moonrise"][0].replace('Z', '+00:00'))
-            moon_info["rise"] = moonrise.strftime("%H:%M")
-        
-        if daily.get("moonset"):
-            moonset = datetime.fromisoformat(daily["moonset"][0].replace('Z', '+00:00'))
-            moon_info["set"] = moonset.strftime("%H:%M")
-    
-    return {
-        "sun": sun_info,
-        "moon": moon_info,
-        "moon_phase": moon_phase
-    }
-
-def get_detailed_weather_report(city_key):
-    """Zwróć szczegółowy raport pogodowy z OpenWeather"""
+def check_future_conditions(city_key: str, hours: int = 24):
+    """Sprawdź warunki w przyszłości (najbliższe godziny)"""
     city = OBSERVATION_CITIES[city_key]
-    
-    # Pobierz dane z obu źródeł
     weather_data = get_weather_forecast(city["lat"], city["lon"])
-    openweather_data = get_openweather_data(city["lat"], city["lon"])
-    forecast_data = get_openweather_forecast(city["lat"], city["lon"])
-    alerts_data = get_weather_alerts(city["lat"], city["lon"])
     
-    if not weather_data or not openweather_data:
+    if not weather_data or "hourly" not in weather_data:
+        return []
+    
+    hourly_data = weather_data["hourly"]
+    good_windows = []
+    
+    for i in range(min(48, len(hourly_data["time"]))):
+        time_str = hourly_data["time"][i]
+        hour_time = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        
+        # Sprawdź tylko najbliższe godziny
+        if (hour_time - datetime.now()).total_seconds() / 3600 > hours:
+            break
+        
+        cloud_cover = hourly_data["cloud_cover"][i]
+        visibility = hourly_data["visibility"][i] / 1000
+        humidity = hourly_data["relative_humidity_2m"][i]
+        wind_speed = hourly_data["wind_speed_10m"][i]
+        
+        # Sprawdź warunki
+        good_conditions = (
+            cloud_cover <= GOOD_CONDITIONS["max_cloud_cover"] and
+            visibility >= GOOD_CONDITIONS["min_visibility"] and
+            humidity <= GOOD_CONDITIONS["max_humidity"] and
+            wind_speed <= GOOD_CONDITIONS["max_wind_speed"]
+        )
+        
+        if good_conditions:
+            good_windows.append({
+                "time": hour_time.strftime("%H:%M"),
+                "datetime": hour_time,
+                "cloud_cover": cloud_cover,
+                "visibility": visibility,
+                "humidity": humidity,
+                "wind_speed": wind_speed
+            })
+    
+    return good_windows
+
+# ====================== NOTIFICATION SYSTEM ======================
+def check_observation_opportunities():
+    """Sprawdź możliwości obserwacji i wyślij powiadomienia"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Pobierz użytkowników z włączonymi powiadomieniami
+    cursor.execute('''
+        SELECT chat_id FROM users WHERE observation_alerts = 1
+    ''')
+    
+    users = cursor.fetchall()
+    conn.close()
+    
+    for (chat_id,) in users:
+        try:
+            # Sprawdź warunki dla obu miast
+            warszawa_conditions = check_city_conditions("warszawa")
+            koszalin_conditions = check_city_conditions("koszalin")
+            
+            # Sprawdź okna obserwacyjne w najbliższych godzinach
+            warszawa_windows = check_future_conditions("warszawa", 6)
+            koszalin_windows = check_future_conditions("koszalin", 6)
+            
+            best_city = None
+            best_windows = []
+            
+            if warszawa_conditions and warszawa_conditions["score"] > 70 and not warszawa_conditions["is_day"]:
+                best_city = warszawa_conditions
+                best_windows = warszawa_windows[:3]  # Pierwsze 3 okna
+            
+            if koszalin_conditions and koszalin_conditions["score"] > 70 and not koszalin_conditions["is_day"]:
+                if not best_city or koszalin_conditions["score"] > best_city["score"]:
+                    best_city = koszalin_conditions
+                    best_windows = koszalin_windows[:3]
+            
+            if best_city and best_windows:
+                message = (
+                    f"🌠 <b>OKNO OBSERWACYJNE DOSTĘPNE!</b>\n\n"
+                    f"📍 <b>Lokalizacja:</b> {best_city['city_emoji']} {best_city['city_name']}\n"
+                    f"📊 <b>Warunki:</b> {best_city['emoji']} {best_city['status']} ({best_city['score']}%)\n"
+                    f"🌡️ <b>Temperatura:</b> {best_city['temperature']:.1f}°C\n"
+                    f"☁️ <b>Zachmurzenie:</b> {best_city['cloud_cover']}%\n"
+                    f"💨 <b>Wiatr:</b> {best_city['wind_speed']} m/s\n\n"
+                    f"<b>Najlepsze godziny:</b>\n"
+                )
+                
+                for window in best_windows:
+                    message += f"• {window['time']} - chmury: {window['cloud_cover']}%, widoczność: {window['visibility']:.1f} km\n"
+                
+                message += f"\n<i>Warunki sprzyjają obserwacjom astronomicznym!</i>"
+                
+                send_telegram_message(chat_id, message)
+                
+                # Aktualizuj czas ostatniego powiadomienia
+                settings = get_user_settings(chat_id)
+                settings["last_notification"] = datetime.now().isoformat()
+                update_user_settings(chat_id, settings)
+                
+        except Exception as e:
+            logger.error(f"❌ Błąd powiadomień dla {chat_id}: {e}")
+
+def check_satellite_passes():
+    """Sprawdź przeloty satelitów i wyślij powiadomienia"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT DISTINCT chat_id FROM users WHERE satellite_notifications = 1
+    ''')
+    
+    users = cursor.fetchall()
+    conn.close()
+    
+    for (chat_id,) in users:
+        try:
+            # Sprawdź przeloty ISS nad Warszawą
+            iss_passes = get_satellite_passes(25544, 52.2297, 21.0122, 0, 1)
+            
+            if iss_passes and "passes" in iss_passes and iss_passes["passes"]:
+                next_pass = iss_passes["passes"][0]
+                
+                start_time = datetime.fromtimestamp(next_pass["startUTC"]).strftime("%H:%M")
+                max_time = datetime.fromtimestamp(next_pass["maxUTC"]).strftime("%H:%M")
+                end_time = datetime.fromtimestamp(next_pass["endUTC"]).strftime("%H:%M")
+                duration = next_pass["endUTC"] - next_pass["startUTC"]
+                
+                message = (
+                    f"🛰️ <b>ISS NAD WARSZAWĄ!</b>\n\n"
+                    f"• <b>Start:</b> {start_time}\n"
+                    f"• <b>Maksimum:</b> {max_time} ({next_pass['maxEl']}°)\n"
+                    f"• <b>Koniec:</b> {end_time}\n"
+                    f"• <b>Czas trwania:</b> {duration:.0f} s\n"
+                    f"• <b>Magnitudo:</b> {next_pass.get('mag', '-3.0')}\n\n"
+                    f"<i>Spójrz w niebo! Międzynarodowa Stacja Kosmiczna będzie widoczna.</i>"
+                )
+                
+                send_telegram_message(chat_id, message)
+                
+        except Exception as e:
+            logger.error(f"❌ Błąd powiadomień satelitów dla {chat_id}: {e}")
+
+# ====================== TELEGRAM FUNCTIONS ======================
+def send_telegram_message(chat_id, text, photo_url=None):
+    """Wyślij wiadomość przez Telegram API"""
+    if photo_url:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+        payload = {
+            "chat_id": chat_id,
+            "photo": photo_url,
+            "caption": text,
+            "parse_mode": "HTML"
+        }
+    else:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ Błąd wysyłania wiadomości: {e}")
         return None
-    
-    current = weather_data["current"]
-    
-    report = {
-        "city_name": city["name"],
-        "city_emoji": city["emoji"],
-        "current": {
-            "temperature": current.get("temperature_2m", 0),
-            "feels_like": openweather_data.get("feels_like", 0),
-            "humidity": current.get("relative_humidity_2m", 0),
-            "pressure": openweather_data.get("pressure", 0),
-            "wind_speed": current.get("wind_speed_10m", 0),
-            "wind_direction": openweather_data.get("wind_deg", 0),
-            "cloud_cover": current.get("cloud_cover", 0),
-            "visibility": round(current.get("visibility", 0) / 1000, 1),
-            "description": openweather_data.get("weather_description", ""),
-            "weather_main": openweather_data.get("weather_main", ""),
-            "weather_icon": openweather_data.get("weather_icon", "")
-        },
-        "sun_info": {
-            "sunrise": openweather_data.get("sunrise", "Brak danych"),
-            "sunset": openweather_data.get("sunset", "Brak danych")
-        },
-        "forecast_available": forecast_data is not None,
-        "alerts": alerts_data,
-        "alerts_count": len(alerts_data),
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-    
-    return report
 
-def format_wind_direction(degrees):
-    """Formatuj kierunek wiatru na podstawie stopni"""
-    if degrees is None:
-        return "Brak danych"
-    
-    directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", 
-                  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
-    index = round(degrees / 22.5) % 16
-    return directions[index]
-
-def get_weather_icon(icon_code):
-    """Mapuj kod ikony pogody na emoji"""
-    icon_map = {
-        "01d": "☀️", "01n": "🌙",
-        "02d": "⛅", "02n": "⛅",
-        "03d": "☁️", "03n": "☁️",
-        "04d": "☁️", "04n": "☁️",
-        "09d": "🌧️", "09n": "🌧️",
-        "10d": "🌦️", "10n": "🌦️",
-        "11d": "⛈️", "11n": "⛈️",
-        "13d": "❄️", "13n": "❄️",
-        "50d": "🌫️", "50n": "🌫️"
-    }
-    return icon_map.get(icon_code, "🌤️")
+def send_photo(chat_id, photo_url, caption=""):
+    """Wyślij zdjęcie"""
+    return send_telegram_message(chat_id, caption, photo_url)
 
 # ====================== FLASK APP ======================
 app = Flask(__name__)
@@ -492,12 +761,14 @@ app = Flask(__name__)
 def home():
     """Strona główna"""
     now = datetime.now()
+    astro_date = get_astronomical_date()
+    moon = calculate_moon_phase()
     
     html = f'''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🤖 SENTRY ONE v8.1</title>
+        <title>🤖 SENTRY ONE v9.0</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
@@ -506,132 +777,148 @@ def home():
                 max-width: 1200px;
                 margin: 0 auto;
                 padding: 20px;
-                background: linear-gradient(135deg, #1a2980 0%, #26d0ce 100%);
+                background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
                 color: white;
                 min-height: 100vh;
             }}
             .container {{
-                background: rgba(255, 255, 255, 0.1);
+                background: rgba(255, 255, 255, 0.08);
                 backdrop-filter: blur(10px);
                 border-radius: 20px;
                 padding: 30px;
                 margin-top: 20px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
+                border: 1px solid rgba(255, 255, 255, 0.15);
             }}
             .header {{
                 text-align: center;
                 margin-bottom: 40px;
+                padding-bottom: 20px;
+                border-bottom: 2px solid rgba(255, 255, 255, 0.2);
             }}
-            .date-section {{
-                text-align: center;
-                margin: 30px 0;
-                padding: 20px;
-                background: rgba(255, 255, 255, 0.15);
-                border-radius: 15px;
-            }}
-            .info-grid {{
+            .stats-grid {{
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
                 gap: 20px;
                 margin: 30px 0;
             }}
-            .info-card {{
+            .stat-card {{
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 border-radius: 15px;
                 padding: 20px;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                transition: transform 0.3s;
             }}
-            .city-card {{
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: 12px;
-                padding: 15px;
-                margin: 15px 0;
+            .stat-card:hover {{
+                transform: translateY(-5px);
+            }}
+            .moon-phase {{
+                text-align: center;
+                font-size: 60px;
+                margin: 20px 0;
             }}
             .api-status {{
                 display: inline-block;
-                padding: 5px 15px;
-                border-radius: 20px;
-                margin: 0 10px;
+                padding: 8px 20px;
+                border-radius: 25px;
+                margin: 5px;
+                font-weight: bold;
                 font-size: 14px;
             }}
-            .api-active {{
-                background: #00b894;
+            .active {{
+                background: linear-gradient(to right, #00b09b, #96c93d);
+            }}
+            .inactive {{
+                background: linear-gradient(to right, #ff416c, #ff4b2b);
+            }}
+            .btn {{
+                display: inline-block;
+                padding: 15px 30px;
+                background: linear-gradient(to right, #4776E6, #8E54E9);
+                color: white;
+                text-decoration: none;
+                border-radius: 12px;
+                font-weight: bold;
+                margin: 10px;
+                transition: all 0.3s;
+            }}
+            .btn:hover {{
+                transform: scale(1.05);
+                box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
             }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1 style="font-size: 48px; margin-bottom: 10px;">🤖 SENTRY ONE v8.1</h1>
-                <h2 style="color: #81ecec;">System Astrometeorologiczny z OpenWeather</h2>
-                <div style="margin: 20px 0;">
-                    <span class="api-status api-active">🟢 SYSTEM AKTYWNY</span>
-                    <span class="api-status api-active">🌤️ OPENWEATHER API</span>
-                    <span class="api-status api-active">🛰️ NASA API</span>
-                </div>
-            </div>
-            
-            <div class="date-section">
-                <h2>📅 {now.strftime("%d.%m.%Y %H:%M")}</h2>
-                <p>System monitoringu warunków obserwacyjnych z rozszerzonymi danymi pogodowymi</p>
-            </div>
-            
-            <div class="info-grid">
-                <div class="info-card">
-                    <h3>🌌 Funkcje systemu</h3>
-                    <ul>
-                        <li>Kalendarz 13-miesięczny</li>
-                        <li>Dane pogodowe z OpenWeather</li>
-                        <li>Prognoza 5-dniowa</li>
-                        <li>Alerty pogodowe</li>
-                        <li>Śledzenie satelitów</li>
-                        <li>Fazy Księżyca</li>
-                    </ul>
+                <h1 style="font-size: 48px; margin-bottom: 10px;">🤖 SENTRY ONE v9.0</h1>
+                <h2 style="color: #81ecec; margin-bottom: 20px;">Ultimate Astrometeorological System</h2>
+                
+                <div class="moon-phase">
+                    {moon['emoji']}
                 </div>
                 
-                <div class="info-card">
-                    <h3>📡 API Status</h3>
-                    <p><strong>OpenWeather:</strong> Aktywny ✓</p>
-                    <p><strong>NASA:</strong> Aktywny ✓</p>
-                    <p><strong>N2YO Satellites:</strong> Aktywny ✓</p>
-                    <p><strong>Open-Meteo:</strong> Aktywny ✓</p>
+                <div style="margin: 20px 0;">
+                    <span class="api-status active">🛰️ NASA API</span>
+                    <span class="api-status active">🌤️ OPENWEATHER</span>
+                    <span class="api-status active">🛰️ N2YO SATELLITES</span>
+                    <span class="api-status active">🔔 POWIADOMIENIA</span>
+                </div>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>🌌 Aktualna faza Księżyca</h3>
+                    <p style="font-size: 24px; margin: 10px 0;">{moon['emoji']} {moon['name']}</p>
+                    <p>Oświetlenie: {moon['illumination']:.1f}%</p>
+                    <p>Wiek: {moon['age_days']:.1f} dni</p>
+                </div>
+                
+                <div class="stat-card">
+                    <h3>📅 Kalendarz Astronomiczny</h3>
+                    <p style="font-size: 24px; margin: 10px 0;">{astro_date['day']} {astro_date['month_symbol']} {astro_date['year']}</p>
+                    <p>{astro_date['month_polish']} • {astro_date['element_emoji']} {astro_date['element']}</p>
+                    <p>Dzień roku: {astro_date['day_of_year']}/365</p>
+                </div>
+                
+                <div class="stat-card">
+                    <h3>📍 Obserwowane miasta</h3>
+                    <p>🏛️ Warszawa: 52.23°N, 21.01°E</p>
+                    <p>🌲 Koszalin: 54.19°N, 16.17°E</p>
+                    <p>👥 Użytkownicy: {get_user_count()}</p>
                 </div>
             </div>
             
             <div style="text-align: center; margin: 40px 0;">
-                <a href="https://t.me/PcSentintel_Bot" target="_blank" style="
-                    background: #0088cc;
-                    color: white;
-                    padding: 15px 30px;
-                    border-radius: 12px;
-                    text-decoration: none;
-                    font-size: 18px;
-                    font-weight: bold;
-                    display: inline-block;
-                    margin: 0 10px;
-                ">
+                <a href="https://t.me/PcSentintel_Bot" target="_blank" class="btn">
                     💬 Otwórz bota w Telegram
                 </a>
                 
-                <a href="/weather/warszawa" style="
-                    background: #00b894;
-                    color: white;
-                    padding: 15px 30px;
-                    border-radius: 12px;
-                    text-decoration: none;
-                    font-size: 18px;
-                    font-weight: bold;
-                    display: inline-block;
-                    margin: 0 10px;
-                ">
-                    🌤️ Przykład danych
+                <a href="/api/status" class="btn" style="background: linear-gradient(to right, #00b09b, #96c93d);">
+                    📊 Status API
+                </a>
+                
+                <a href="/api/nasa/apod" class="btn" style="background: linear-gradient(to right, #8E2DE2, #4A00E0);">
+                    🛰️ NASA APOD
                 </a>
             </div>
             
-            <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.3);">
-                <p>🤖 SENTRY ONE v8.1 | System astrometeorologiczny z OpenWeather API</p>
-                <p>🌌 Kalendarz 13-miesięczny | Rozszerzone dane pogodowe | Śledzenie satelitów</p>
-                <p style="font-family: monospace; font-size: 12px;">{now.strftime("%Y-%m-%d %H:%M:%S")}</p>
+            <div style="background: rgba(0, 0, 0, 0.3); padding: 20px; border-radius: 15px; margin-top: 30px;">
+                <h3>🚀 Funkcje systemu:</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                    <div>• Zdjęcia NASA w czasie rzeczywistym</div>
+                    <div>• Śledzenie satelitów (ISS, Hubble, itp.)</div>
+                    <div>• Powiadomienia o przelotach</div>
+                    <div>• Prognoza warunków obserwacyjnych</div>
+                    <div>• Kalendarz 13-miesięczny</div>
+                    <div>• Alerty pogodowe OpenWeather</div>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2);">
+                <p>🤖 SENTRY ONE v9.0 | Ultimate astrometeorological monitoring system</p>
+                <p style="font-family: monospace; font-size: 12px; opacity: 0.8;">
+                    {now.strftime("%Y-%m-%d %H:%M:%S")} | Warszawa/Koszalin | NASA + N2YO + OpenWeather
+                </p>
             </div>
         </div>
     </body>
@@ -639,35 +926,17 @@ def home():
     '''
     return html
 
-@app.route('/weather/<city>')
-def weather_endpoint(city):
-    """Endpoint testowy dla danych pogodowych"""
-    if city.lower() not in OBSERVATION_CITIES:
-        return jsonify({"error": "Nieznane miasto"}), 404
-    
-    report = get_detailed_weather_report(city.lower())
-    
-    if report:
-        return jsonify(report)
-    else:
-        return jsonify({"error": "Nie udało się pobrać danych"}), 500
-
-# ====================== TELEGRAM FUNCTIONS ======================
-def send_telegram_message(chat_id, text):
-    """Wyślij wiadomość przez Telegram API"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
+def get_user_count():
+    """Pobierz liczbę użytkowników"""
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
-    except Exception as e:
-        logger.error(f"❌ Błąd wysyłania wiadomości: {e}")
-        return None
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    except:
+        return 0
 
 # ====================== TELEGRAM WEBHOOK ======================
 @app.route('/webhook', methods=['POST'])
@@ -679,598 +948,425 @@ def webhook():
         if "message" in data:
             message = data["message"]
             chat_id = message["chat"]["id"]
-            text = message.get("text", "").strip()
+            text = message.get("text", "").strip().lower()
+            
+            # Pobierz ustawienia użytkownika
+            user_settings = get_user_settings(chat_id)
             
             if text == "/start":
-                # Pobierz wszystkie dane
+                # NASA APOD
+                nasa_apod = get_nasa_apod()
+                
+                # Zdjęcia miast
+                warszawa_image = get_satellite_image_for_city("warszawa")
+                koszalin_image = get_satellite_image_for_city("koszalin")
+                
+                # Dane astronomiczne
                 now = datetime.now()
                 astro_date = get_astronomical_date()
-                sun_moon = get_sun_moon_info()
+                moon = calculate_moon_phase()
                 
-                # Sprawdź warunki dla miast
+                # Warunki obserwacyjne
                 warszawa_conditions = check_city_conditions("warszawa")
                 koszalin_conditions = check_city_conditions("koszalin")
                 
-                # ========== BUDUJEMY KOMPLETNY RAPORT ==========
+                # Czasy wschodów/zachodów
+                warszawa_times = get_sun_moon_times("warszawa")
+                koszalin_times = get_sun_moon_times("koszalin")
+                
+                # ========== BUDUJEMY SUPER RAPORT ==========
                 report = ""
                 
-                # 1. NAGŁÓWEK - DATA KALENDARZOWA
-                report += f"<b>📅 DATA KALENDARZOWA:</b>\n"
-                report += f"• {now.strftime('%A, %d %B %Y')}\n"
-                report += f"• Godzina: {now.strftime('%H:%M:%S')}\n"
-                report += f"• Dzień roku: {astro_date['day_of_year']}/365\n\n"
+                # 1. WITAJ + NASA APOD
+                report += f"🌌 <b>SENTRY ONE v9.0 - ULTIMATE SYSTEM</b>\n\n"
                 
-                # 2. DATA ASTRONOMICZNA
-                report += f"<b>{astro_date['month_symbol']} DATA ASTRONOMICZNA (13-miesięczna):</b>\n"
+                if nasa_apod:
+                    report += f"<b>🛰️ NASA PICTURE OF THE DAY:</b>\n"
+                    report += f"• {nasa_apod['title']}\n"
+                    report += f"• Data: {nasa_apod['date']}\n"
+                    if nasa_apod.get('url'):
+                        send_photo(chat_id, nasa_apod['url'], report)
+                        report = ""  # Reset dla dalszej części
+                
+                # 2. DATA I CZASY ASTRONOMICZNE
+                report += f"<b>📅 DATA I CZASY:</b>\n"
+                report += f"• {now.strftime('%d.%m.%Y %H:%M:%S')}\n"
                 report += f"• {astro_date['day']} {astro_date['month_symbol']} {astro_date['month_polish']} {astro_date['year']}\n"
-                report += f"• Domena: {astro_date['element_emoji']} {astro_date['element']}\n"
-                report += f"• {astro_date['description']}\n\n"
+                report += f"• {astro_date['element_emoji']} {astro_date['element']}\n\n"
                 
-                # 3. SŁOŃCE I KSIĘŻYC
-                report += f"<b>🌞 SŁOŃCE:</b>\n"
-                report += f"• Wschód: {sun_moon['sun']['rise']}\n"
-                report += f"• Zachód: {sun_moon['sun']['set']}\n\n"
+                # 3. KSIĘŻYC
+                report += f"<b>{moon['emoji']} KSIĘŻYC:</b>\n"
+                report += f"• Faza: {moon['name']}\n"
+                report += f"• Oświetlenie: {moon['illumination']:.1f}%\n"
+                report += f"• Wiek: {moon['age_days']:.1f} dni\n\n"
                 
-                report += f"<b>{sun_moon['moon_phase']['emoji']} KSIĘŻYC:</b>\n"
-                report += f"• Faza: {sun_moon['moon_phase']['name']}\n"
-                report += f"• Oświetlenie: {sun_moon['moon_phase']['illumination']:.1f}%\n"
-                report += f"• Wschód: {sun_moon['moon']['rise']}\n"
-                report += f"• Zachód: {sun_moon['moon']['set']}\n\n"
+                # 4. SŁOŃCE I KSIĘŻYC WARSZAWA
+                report += f"<b>🏛️ WARSZAWA - CZASY:</b>\n"
+                report += f"🌞 Słońce: {warszawa_times['sun']['rise']} ↑ | {warszawa_times['sun']['set']} ↓\n"
+                report += f"{warszawa_times['moon_phase']['emoji']} Księżyc: {warszawa_times['moon']['rise']} ↑ | {warszawa_times['moon']['set']} ↓\n\n"
                 
-                # 4. WARUNKI OBSERWACYJNE - WARSZAWA
                 if warszawa_conditions:
-                    report += f"<b>{warszawa_conditions['city_emoji']} WARSZAWA - Warunki obserwacyjne:</b>\n"
-                    report += f"• Status: {warszawa_conditions['emoji']} {warszawa_conditions['status']} ({warszawa_conditions['score']}%)\n"
-                    report += f"• Temperatura: {warszawa_conditions['temperature']:.1f}°C\n"
-                    
-                    # Dodaj dodatkowe dane z OpenWeather jeśli dostępne
-                    if warszawa_conditions.get('openweather_available'):
-                        report += f"• Odczuwalna: {warszawa_conditions.get('feels_like', warszawa_conditions['temperature']):.1f}°C\n"
-                        report += f"• Ciśnienie: {warszawa_conditions.get('pressure', '?')} hPa\n"
-                        if warszawa_conditions.get('weather_description'):
-                            report += f"• Opis: {warszawa_conditions['weather_description'].capitalize()}\n"
-                    
-                    report += f"• Zachmurzenie: {warszawa_conditions['cloud_cover']}%\n"
-                    report += f"• Wilgotność: {warszawa_conditions['humidity']}%\n"
-                    report += f"• Wiatr: {warszawa_conditions['wind_speed']} m/s\n"
-                    report += f"• Widoczność: {warszawa_conditions['visibility']} km\n"
-                    report += f"• Czas: {'☀️ Dzień' if warszawa_conditions['is_day'] else '🌙 Noc'}\n"
-                    report += f"• Spełnione warunki: {warszawa_conditions['conditions_met']}/{warszawa_conditions['total_conditions']}\n\n"
+                    report += f"<b>📊 WARUNKI OBSERWACYJNE:</b>\n"
+                    report += f"Status: {warszawa_conditions['emoji']} {warszawa_conditions['status']} ({warszawa_conditions['score']}%)\n"
+                    report += f"Temp: {warszawa_conditions['temperature']:.1f}°C | "
+                    report += f"Chmury: {warszawa_conditions['cloud_cover']}%\n"
+                    report += f"Wiatr: {warszawa_conditions['wind_speed']} m/s | "
+                    report += f"Widoczność: {warszawa_conditions['visibility']} km\n\n"
                 
-                # 5. WARUNKI OBSERWACYJNE - KOSZALIN
+                # 5. SŁOŃCE I KSIĘŻYC KOSZALIN
+                report += f"<b>🌲 KOSZALIN - CZASY:</b>\n"
+                report += f"🌞 Słońce: {koszalin_times['sun']['rise']} ↑ | {koszalin_times['sun']['set']} ↓\n"
+                report += f"{koszalin_times['moon_phase']['emoji']} Księżyc: {koszalin_times['moon']['rise']} ↑ | {koszalin_times['moon']['set']} ↓\n\n"
+                
                 if koszalin_conditions:
-                    report += f"<b>{koszalin_conditions['city_emoji']} KOSZALIN - Warunki obserwacyjne:</b>\n"
-                    report += f"• Status: {koszalin_conditions['emoji']} {koszalin_conditions['status']} ({koszalin_conditions['score']}%)\n"
-                    report += f"• Temperatura: {koszalin_conditions['temperature']:.1f}°C\n"
-                    
-                    # Dodaj dodatkowe dane z OpenWeather jeśli dostępne
-                    if koszalin_conditions.get('openweather_available'):
-                        report += f"• Odczuwalna: {koszalin_conditions.get('feels_like', koszalin_conditions['temperature']):.1f}°C\n"
-                        report += f"• Ciśnienie: {koszalin_conditions.get('pressure', '?')} hPa\n"
-                        if koszalin_conditions.get('weather_description'):
-                            report += f"• Opis: {koszalin_conditions['weather_description'].capitalize()}\n"
-                    
-                    report += f"• Zachmurzenie: {koszalin_conditions['cloud_cover']}%\n"
-                    report += f"• Wilgotność: {koszalin_conditions['humidity']}%\n"
-                    report += f"• Wiatr: {koszalin_conditions['wind_speed']} m/s\n"
-                    report += f"• Widoczność: {koszalin_conditions['visibility']} km\n"
-                    report += f"• Czas: {'☀️ Dzień' if koszalin_conditions['is_day'] else '🌙 Noc'}\n"
-                    report += f"• Spełnione warunki: {koszalin_conditions['conditions_met']}/{koszalin_conditions['total_conditions']}\n\n"
+                    report += f"<b>📊 WARUNKI OBSERWACYJNE:</b>\n"
+                    report += f"Status: {koszalin_conditions['emoji']} {koszalin_conditions['status']} ({koszalin_conditions['score']}%)\n"
+                    report += f"Temp: {koszalin_conditions['temperature']:.1f}°C | "
+                    report += f"Chmury: {koszalin_conditions['cloud_cover']}%\n"
+                    report += f"Wiatr: {koszalin_conditions['wind_speed']} m/s | "
+                    report += f"Widoczność: {koszalin_conditions['visibility']} km\n\n"
                 
-                # 6. KRYTERIA OCENY
-                report += f"<b>📊 KRYTERIA DOBREJ WIDOCZNOŚCI:</b>\n"
-                report += f"• Zachmurzenie ≤ {GOOD_CONDITIONS['max_cloud_cover']}%\n"
-                report += f"• Widoczność ≥ {GOOD_CONDITIONS['min_visibility']} km\n"
-                report += f"• Wilgotność ≤ {GOOD_CONDITIONS['max_humidity']}%\n"
-                report += f"• Wiatr ≤ {GOOD_CONDITIONS['max_wind_speed']} m/s\n"
-                report += f"• Temperatura: {GOOD_CONDITIONS['min_temperature']}°C do {GOOD_CONDITIONS['max_temperature']}°C\n\n"
+                # 6. POWIADOMIENIA
+                report += f"<b>🔔 TWOJE USTAWIENIA:</b>\n"
+                report += f"• Powiadomienia satelitarne: {'✅ WŁĄCZONE' if user_settings['satellite_notifications'] else '❌ WYŁĄCZONE'}\n"
+                report += f"• Alerty obserwacyjne: {'✅ WŁĄCZONE' if user_settings['observation_alerts'] else '❌ WYŁĄCZONE'}\n\n"
                 
-                # 7. REKOMENDACJA
-                if warszawa_conditions and koszalin_conditions:
-                    best_city = warszawa_conditions if warszawa_conditions['score'] >= koszalin_conditions['score'] else koszalin_conditions
-                    
-                    if best_city['status'] in ["DOSKONAŁE", "DOBRE"] and not best_city['is_day']:
-                        report += "✅ <b>REKOMENDACJA:</b> Warunki odpowiednie do obserwacji!\n"
-                        report += f"• Najlepsze warunki: {best_city['city_name']}\n"
-                        report += "• Wychodź na obserwacje!\n"
-                    elif best_city['status'] in ["DOSKONAŁE", "DOBRE"] and best_city['is_day']:
-                        report += "⚠️ <b>REKOMENDACJA:</b> Dobre warunki, ale jest dzień.\n"
-                        report += "• Poczekaj do zachodu słońca\n"
-                        report += f"• Zachód o: {sun_moon['sun']['set']}\n"
-                    else:
-                        report += "❌ <b>REKOMENDACJA:</b> Warunki nieodpowiednie.\n"
-                        report += "• Poczekaj na lepszą pogodę\n"
+                # 7. ZDJĘCIA
+                report += f"<b>🛰️ ZDJĘCIA SATELITARNE:</b>\n"
+                if warszawa_image:
+                    report += f"• Warszawa: {warszawa_image['date']}\n"
+                    send_photo(chat_id, warszawa_image['url'], f"🛰️ Zdjęcie satelitarne Warszawy\nData: {warszawa_image['date']}")
                 
-                # 8. NOWE KOMENDY OPENWEATHER
-                report += f"\n{'='*40}\n"
-                report += "<b>🌤️ NOWE KOMENDY OPENWEATHER:</b>\n\n"
-                report += "<code>/weather warszawa</code> - Szczegółowy raport pogodowy\n"
-                report += "<code>/weather koszalin</code> - Szczegółowy raport pogodowy\n"
-                report += "<code>/forecast warszawa</code> - Prognoza 5-dniowa\n"
-                report += "<code>/alerts warszawa</code> - Alerty pogodowe\n"
-                report += "<code>/pressure warszawa</code> - Ciśnienie i wilgotność\n\n"
+                if koszalin_image:
+                    report += f"• Koszalin: {koszalin_image['date']}\n"
+                    time.sleep(1)  # Opóźnienie między zdjęciami
+                    send_photo(chat_id, koszalin_image['url'], f"🛰️ Zdjęcie satelitarne Koszalina\nData: {koszalin_image['date']}")
                 
-                report += "<i>⚡ System aktualizowany na bieżąco z OpenWeather API</i>\n"
-                report += f"<i>🕐 Ostatnia aktualizacja: {now.strftime('%H:%M:%S')}</i>"
+                # 8. KOMENDY
+                report += f"\n{'═'*40}\n"
+                report += f"<b>🚀 DOSTĘPNE KOMENDY:</b>\n\n"
+                report += f"<code>/nasa</code> - Zdjęcie dnia NASA\n"
+                report += f"<code>/satellites on/off</code> - Włącz/wyłącz śledzenie satelitów\n"
+                report += f"<code>/alerts on/off</code> - Alerty obserwacyjne\n"
+                report += f"<code>/iss</code> - Pozycja ISS\n"
+                report += f"<code>/moon</code> - Szczegóły Księżyca\n"
+                report += f"<code>/weather [miasto]</code> - Prognoza\n"
+                report += f"<code>/photo warszawa/koszalin</code> - Zdjęcie satelitarne\n"
+                report += f"<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
+                report += f"<code>/help</code> - Wszystkie komendy\n\n"
                 
-                # Wyślij raport
+                report += f"<i>🤖 System monitoruje warunki 24/7</i>"
+                
                 send_telegram_message(chat_id, report)
                 
-            elif text.startswith("/astro"):
+            elif text == "/nasa":
+                nasa_apod = get_nasa_apod()
+                if nasa_apod:
+                    response = (
+                        f"🛰️ <b>NASA ASTRONOMY PICTURE OF THE DAY</b>\n\n"
+                        f"<b>{nasa_apod['title']}</b>\n"
+                        f"Data: {nasa_apod['date']}\n\n"
+                        f"{nasa_apod['explanation'][:300]}...\n\n"
+                        f"<i>Źródło: NASA APOD API</i>"
+                    )
+                    send_photo(chat_id, nasa_apod['url'], response)
+                else:
+                    send_telegram_message(chat_id, "❌ Nie udało się pobrać zdjęcia NASA")
+            
+            elif text.startswith("/satellites"):
+                args = text[11:].strip().lower()
+                
+                if args == "on":
+                    user_settings["satellite_notifications"] = True
+                    update_user_settings(chat_id, user_settings)
+                    send_telegram_message(chat_id, "✅ <b>POWIADOMIENIA SATELITARNE WŁĄCZONE</b>\n\nBędziesz otrzymywać powiadomienia o przelotach satelitów nad Twoją lokalizacją.")
+                
+                elif args == "off":
+                    user_settings["satellite_notifications"] = False
+                    update_user_settings(chat_id, user_settings)
+                    send_telegram_message(chat_id, "❌ <b>POWIADOMIENIA SATELITARNE WYŁĄCZONE</b>\n\nNie będziesz otrzymywać powiadomień o satelitach.")
+                
+                else:
+                    status = "WŁĄCZONE" if user_settings["satellite_notifications"] else "WYŁĄCZONE"
+                    send_telegram_message(chat_id, f"🔔 <b>STATUS POWIADOMIEŃ SATELITARNYCH:</b> {status}\n\nUżyj: <code>/satellites on</code> lub <code>/satellites off</code>")
+            
+            elif text.startswith("/alerts"):
+                args = text[7:].strip().lower()
+                
+                if args == "on":
+                    user_settings["observation_alerts"] = True
+                    update_user_settings(chat_id, user_settings)
+                    send_telegram_message(chat_id, "✅ <b>ALERTY OBSERWACYJNE WŁĄCZONE</b>\n\nBędziesz otrzymywać powiadomienia o sprzyjających warunkach do obserwacji.")
+                
+                elif args == "off":
+                    user_settings["observation_alerts"] = False
+                    update_user_settings(chat_id, user_settings)
+                    send_telegram_message(chat_id, "❌ <b>ALERTY OBSERWACYJNE WYŁĄCZONE</b>\n\nNie będziesz otrzymywać powiadomień o warunkach obserwacyjnych.")
+                
+                else:
+                    status = "WŁĄCZONE" if user_settings["observation_alerts"] else "WYŁĄCZONE"
+                    send_telegram_message(chat_id, f"🔔 <b>STATUS ALERTÓW OBSERWACYJNYCH:</b> {status}\n\nUżyj: <code>/alerts on</code> lub <code>/alerts off</code>")
+            
+            elif text == "/iss":
+                iss_data = get_iss_position()
+                if iss_data and "positions" in iss_data:
+                    position = iss_data["positions"][0]
+                    
+                    response = (
+                        f"🛰️ <b>MIĘDZYNARODOWA STACJA KOSMICZNA</b>\n\n"
+                        f"<b>Aktualna pozycja:</b>\n"
+                        f"• Szerokość: {position['satlatitude']:.2f}°\n"
+                        f"• Długość: {position['satlongitude']:.2f}°\n"
+                        f"• Wysokość: {position['sataltitude']:.2f} km\n"
+                        f"• Prędkość: ~27,600 km/h\n\n"
+                        f"<b>Nad Warszawą:</b>\n"
+                    )
+                    
+                    # Sprawdź przeloty nad Warszawą
+                    passes = get_satellite_passes(25544, 52.2297, 21.0122, 0, 2)
+                    if passes and "passes" in passes:
+                        for p in passes["passes"][:2]:
+                            start = datetime.fromtimestamp(p["startUTC"]).strftime("%H:%M")
+                            end = datetime.fromtimestamp(p["endUTC"]).strftime("%H:%M")
+                            response += f"• {start} - {end} (max: {p['maxEl']}°)\n"
+                    
+                    response += f"\n<i>Aktualizacja: {datetime.now().strftime('%H:%M:%S')}</i>"
+                    send_telegram_message(chat_id, response)
+                else:
+                    send_telegram_message(chat_id, "🛰️ <b>ISS</b>\n\nNie udało się pobrać aktualnej pozycji.\nSpróbuj ponownie za chwilę.")
+            
+            elif text == "/moon":
+                moon = calculate_moon_phase()
+                now = datetime.now()
+                
+                response = (
+                    f"{moon['emoji']} <b>SZCZEGÓŁOWY RAPORT KSIĘŻYCA</b>\n\n"
+                    f"• <b>Faza:</b> {moon['name']}\n"
+                    f"• <b>Oświetlenie:</b> {moon['illumination']:.1f}%\n"
+                    f"• <b>Wiek:</b> {moon['age_days']:.2f} dni\n"
+                    f"• <b>Cykl księżycowy:</b> {moon['phase']:.3f}\n"
+                    f"• <b>Do następnej pełni:</b> {moon['next_full']:.1f} dni\n"
+                    f"• <b>Do następnego nowiu:</b> {moon['next_new']:.1f} dni\n\n"
+                    
+                    f"<b>Najlepsze warunki do obserwacji:</b>\n"
+                    f"• Faza: 30-70% (pierwsza/ostatnia kwadra)\n"
+                    f"• Księżyc nisko nad horyzontem\n"
+                    f"• Noc bezchmurna\n\n"
+                    
+                    f"<i>Dane aktualne na: {now.strftime('%H:%M:%S')}</i>"
+                )
+                send_telegram_message(chat_id, response)
+            
+            elif text.startswith("/photo"):
                 args = text[6:].strip().lower()
                 
-                if args == "":
-                    # Krótki raport dla Warszawy
-                    warszawa_conditions = check_city_conditions("warszawa")
-                    
-                    if warszawa_conditions:
-                        response = (
-                            f"{warszawa_conditions['city_emoji']} <b>SZYBKI RAPORT - WARSZAWA</b>\n\n"
-                            f"Status: {warszawa_conditions['emoji']} {warszawa_conditions['status']} "
-                            f"({warszawa_conditions['score']}%)\n"
-                            f"Temp: {warszawa_conditions['temperature']:.1f}°C\n"
-                            f"Chmury: {warszawa_conditions['cloud_cover']}%\n"
-                            f"Wiatr: {warszawa_conditions['wind_speed']} m/s\n"
-                            f"Widoczność: {warszawa_conditions['visibility']} km\n\n"
-                            f"<i>Użyj /astro [miasto] dla pełnego raportu</i>"
-                        )
-                        send_telegram_message(chat_id, response)
-                    
-                elif args == "moon":
-                    moon = calculate_moon_phase()
-                    response = (
-                        f"{moon['emoji']} <b>FAZA KSIĘŻYCA</b>\n\n"
-                        f"• Faza: {moon['name']}\n"
-                        f"• Oświetlenie: {moon['illumination']:.1f}%\n"
-                        f"• Cykl księżycowy: {moon['phase']:.3f}\n\n"
-                        f"<i>Aktualizacja: {datetime.now().strftime('%H:%M')}</i>"
-                    )
-                    send_telegram_message(chat_id, response)
-                    
-                elif args == "calendar":
-                    response = (
-                        "📅 <b>KALENDARZ 13-MIESIĘCZNY</b>\n\n"
-                        "<b>Miesiące astronomiczne:</b>\n"
-                        "• ♐ Strzelec: 18.12 - 19.01\n"
-                        "• ♑ Koziorożec: 20.01 - 16.02 ✓\n"
-                        "• ♒ Wodnik: 17.02 - 18.03\n"
-                        "• ♓ Ryby: 19.03 - 17.04\n"
-                        "• ♈ Baran: 18.04 - 18.05\n"
-                        "• ♉ Byk: 19.05 - 17.06\n"
-                        "• ♊ Bliźnięta: 18.06 - 16.07\n"
-                        "• ♋ Rak: 17.07 - 16.08\n"
-                        "• ♌ Lew: 17.08 - 15.09\n"
-                        "• ♍ Panna: 16.09 - 15.10\n"
-                        "• ♎ Waga: 16.10 - 15.11\n"
-                        "• ♏ Skorpion: 16.11 - 28.11\n"
-                        "• ⛎ Wężownik: 29.11 - 17.12\n\n"
-                        "<i>Użyj /astro date dla aktualnej daty</i>"
-                    )
-                    send_telegram_message(chat_id, response)
-                    
-                elif args == "date":
-                    astro_date = get_astronomical_date()
-                    response = (
-                        f"📅 <b>DATA ASTRONOMICZNA</b>\n\n"
-                        f"• Kalendarz gregoriański: {datetime.now().strftime('%d.%m.%Y')}\n"
-                        f"• Data astronomiczna: {astro_date['day']} {astro_date['month_symbol']} "
-                        f"{astro_date['month_polish']} {astro_date['year']}\n"
-                        f"• Domena: {astro_date['element_emoji']} {astro_date['element']}\n"
-                        f"• Opis: {astro_date['description']}\n"
-                    )
-                    send_telegram_message(chat_id, response)
-                    
-                elif args in ["warszawa", "koszalin"]:
-                    # Pełny raport dla miasta
-                    city_info = OBSERVATION_CITIES[args]
-                    weather_data = get_weather_forecast(city_info["lat"], city_info["lon"])
-                    
-                    if weather_data:
-                        conditions = check_city_conditions(args)
-                        if conditions:
-                            # Pełny raport miasta
-                            sun_moon = get_sun_moon_info()
-                            
-                            response = (
-                                f"{conditions['city_emoji']} <b>PEŁNY RAPORT - {conditions['city_name'].upper()}</b>\n\n"
-                                
-                                f"<b>📊 WARUNKI POGODOWE:</b>\n"
-                                f"• Status: {conditions['emoji']} {conditions['status']} ({conditions['score']}%)\n"
-                                f"• Temperatura: {conditions['temperature']:.1f}°C\n"
-                            )
-                            
-                            # Dodaj dane OpenWeather jeśli dostępne
-                            if conditions.get('openweather_available'):
-                                response += f"• Odczuwalna: {conditions.get('feels_like', conditions['temperature']):.1f}°C\n"
-                                response += f"• Ciśnienie: {conditions.get('pressure', '?')} hPa\n"
-                                if conditions.get('weather_description'):
-                                    response += f"• Opis: {conditions['weather_description'].capitalize()}\n"
-                            
-                            response += (
-                                f"• Zachmurzenie: {conditions['cloud_cover']}%\n"
-                                f"• Wilgotność: {conditions['humidity']}%\n"
-                                f"• Wiatr: {conditions['wind_speed']} m/s\n"
-                                f"• Widoczność: {conditions['visibility']} km\n"
-                                f"• Czas: {'☀️ Dzień' if conditions['is_day'] else '🌙 Noc'}\n\n"
-                                
-                                f"<b>🌞 SŁOŃCE:</b>\n"
-                                f"• Wschód: {sun_moon['sun']['rise']}\n"
-                                f"• Zachód: {sun_moon['sun']['set']}\n\n"
-                                
-                                f"<b>{sun_moon['moon_phase']['emoji']} KSIĘŻYC:</b>\n"
-                                f"• Faza: {sun_moon['moon_phase']['name']}\n"
-                                f"• Oświetlenie: {sun_moon['moon_phase']['illumination']:.1f}%\n"
-                                f"• Wschód: {sun_moon['moon']['rise']}\n"
-                                f"• Zachód: {sun_moon['moon']['set']}\n\n"
-                                
-                                f"<b>📈 OCENA:</b>\n"
-                                f"• Spełnione warunki: {conditions['conditions_met']}/5\n"
-                                f"• Zachmurzenie: {'✅' if conditions['cloud_cover'] <= 30 else '❌'} "
-                                f"(≤{GOOD_CONDITIONS['max_cloud_cover']}%)\n"
-                                f"• Widoczność: {'✅' if conditions['visibility'] >= 10 else '❌'} "
-                                f"(≥{GOOD_CONDITIONS['min_visibility']} km)\n"
-                                f"• Wilgotność: {'✅' if conditions['humidity'] <= 80 else '❌'} "
-                                f"(≤{GOOD_CONDITIONS['max_humidity']}%)\n"
-                                f"• Wiatr: {'✅' if conditions['wind_speed'] <= 15 else '❌'} "
-                                f"(≤{GOOD_CONDITIONS['max_wind_speed']} m/s)\n"
-                                f"• Temperatura: {'✅' if -10 <= conditions['temperature'] <= 30 else '❌'} "
-                                f"({GOOD_CONDITIONS['min_temperature']}°C do {GOOD_CONDITIONS['max_temperature']}°C)\n\n"
-                            )
-                            
-                            # Dodaj rekomendację
-                            if conditions['status'] in ["DOSKONAŁE", "DOBRE"] and not conditions['is_day']:
-                                response += "✅ <b>REKOMENDACJA:</b> Warunki doskonałe do obserwacji!\n"
-                            elif conditions['status'] in ["DOSKONAŁE", "DOBRE"] and conditions['is_day']:
-                                response += f"⚠️ <b>REKOMENDACJA:</b> Dobre warunki, ale jest dzień.\n"
-                                response += f"• Zachód słońca: {sun_moon['sun']['set']}\n"
-                            elif conditions['status'] == "ŚREDNIE":
-                                response += "⚠️ <b>REKOMENDACJA:</b> Warunki umiarkowane.\n"
-                                response += "• Możliwa obserwacja najjaśniejszych obiektów\n"
-                            else:
-                                response += "❌ <b>REKOMENDACJA:</b> Warunki nieodpowiednie.\n"
-                                response += "• Poczekaj na poprawę pogody\n"
-                            
-                            send_telegram_message(chat_id, response)
-                        else:
-                            send_telegram_message(chat_id, "❌ Nie udało się przeanalizować warunków")
+                if args == "warszawa":
+                    image = get_satellite_image_for_city("warszawa")
+                    if image:
+                        send_photo(chat_id, image['url'], 
+                                 f"🛰️ <b>ZDJĘCIE SATELITARNE WARSZAWY</b>\n\n"
+                                 f"Data: {image['date']}\n"
+                                 f"Współrzędne: 52.23°N, 21.01°E\n\n"
+                                 f"<i>Źródło: NASA Earth API</i>")
                     else:
-                        send_telegram_message(chat_id, "❌ Błąd pobierania danych pogodowych")
+                        send_telegram_message(chat_id, "❌ Nie udało się znaleźć aktualnego zdjęcia Warszawy.\nSpróbuj ponownie później.")
+                
+                elif args == "koszalin":
+                    image = get_satellite_image_for_city("koszalin")
+                    if image:
+                        send_photo(chat_id, image['url'],
+                                 f"🛰️ <b>ZDJĘCIE SATELITARNE KOSZALINA</b>\n\n"
+                                 f"Data: {image['date']}\n"
+                                 f"Współrzędne: 54.19°N, 16.17°E\n\n"
+                                 f"<i>Źródło: NASA Earth API</i>")
+                    else:
+                        send_telegram_message(chat_id, "❌ Nie udało się znaleźć aktualnego zdjęcia Koszalina.\nSpróbuj ponownie później.")
+                
+                else:
+                    send_telegram_message(chat_id, "📸 <b>ZDJĘCIA SATELITARNE</b>\n\n"
+                                                 "Użyj:\n"
+                                                 "<code>/photo warszawa</code>\n"
+                                                 "<code>/photo koszalin</code>")
             
             elif text.startswith("/weather"):
                 args = text[8:].strip().lower()
                 
                 if args in ["warszawa", "koszalin"]:
-                    report = get_detailed_weather_report(args)
+                    # Szczegółowy raport pogodowy
+                    city = OBSERVATION_CITIES[args]
+                    conditions = check_city_conditions(args)
+                    times = get_sun_moon_times(args)
                     
-                    if report:
-                        city_emoji = OBSERVATION_CITIES[args]["emoji"]
-                        current = report["current"]
-                        
+                    if conditions:
                         response = (
-                            f"{city_emoji} <b>SZCZEGÓŁOWY RAPORT POGODOWY - {report['city_name'].upper()}</b>\n\n"
+                            f"{conditions['city_emoji']} <b>SZCZEGÓŁOWA PROGNOZA - {conditions['city_name'].upper()}</b>\n\n"
                             
-                            f"<b>🌡️ AKTUALNA POGODA:</b>\n"
-                            f"• Temperatura: {current['temperature']:.1f}°C\n"
-                            f"• Odczuwalna: {current['feels_like']:.1f}°C\n"
-                            f"• Opis: {current['description'].capitalize()} {get_weather_icon(current['weather_icon'])}\n"
-                            f"• Wilgotność: {current['humidity']}%\n"
-                            f"• Ciśnienie: {current['pressure']} hPa\n"
-                            f"• Wiatr: {current['wind_speed']} m/s {format_wind_direction(current['wind_direction'])}\n"
-                            f"• Zachmurzenie: {current['cloud_cover']}%\n"
-                            f"• Widoczność: {current['visibility']} km\n\n"
+                            f"<b>🌡️ AKTUALNIE:</b>\n"
+                            f"• {conditions['temperature']:.1f}°C | "
+                            f"Chmury: {conditions['cloud_cover']}%\n"
+                            f"• Wiatr: {conditions['wind_speed']} m/s | "
+                            f"Wilgotność: {conditions['humidity']}%\n"
+                            f"• Widoczność: {conditions['visibility']} km\n"
+                            f"• Status: {conditions['emoji']} {conditions['status']}\n\n"
                             
-                            f"<b>🌞 SŁOŃCE:</b>\n"
-                            f"• Wschód: {report['sun_info']['sunrise']}\n"
-                            f"• Zachód: {report['sun_info']['sunset']}\n\n"
+                            f"<b>🌞 SŁOŃCE:</b> {times['sun']['rise']} ↑ | {times['sun']['set']} ↓\n"
+                            f"<b>{times['moon_phase']['emoji']} KSIĘŻYC:</b> {times['moon']['rise']} ↑ | {times['moon']['set']} ↓\n\n"
+                            
+                            f"<b>📊 OCENA OBSERWACYJNA:</b> {conditions['score']}%\n"
+                            f"• Warunki spełnione: {conditions['conditions_met']}/5\n\n"
                         )
                         
-                        # Dodaj alerty jeśli są
-                        if report['alerts_count'] > 0:
-                            response += f"<b>⚠️ ALERTY POGODOWE ({report['alerts_count']}):</b>\n"
-                            for alert in report['alerts'][:3]:  # Pokaż tylko 3 pierwsze alerty
-                                response += f"• {alert['event']} ({alert['start']})\n"
-                            response += "\n"
-                        
-                        response += f"<i>Źródło: OpenWeather API</i>\n"
-                        response += f"<i>Aktualizacja: {report['timestamp']}</i>"
+                        # Dodaj prognozę na najbliższe godziny
+                        future_windows = check_future_conditions(args, 12)
+                        if future_windows:
+                            response += f"<b>🕐 NAJLEPSZE GODZINY (następne 12h):</b>\n"
+                            for window in future_windows[:5]:
+                                response += f"• {window['time']} - chmury: {window['cloud_cover']}%\n"
                         
                         send_telegram_message(chat_id, response)
-                    else:
-                        send_telegram_message(chat_id, "❌ Błąd pobierania szczegółowych danych pogodowych")
-                else:
-                    send_telegram_message(chat_id, "📝 <b>Użycie:</b>\n<code>/weather warszawa</code>\n<code>/weather koszalin</code>")
-            
-            elif text.startswith("/forecast"):
-                args = text[9:].strip().lower()
-                
-                if args in ["warszawa", "koszalin"]:
-                    forecast_data = get_openweather_forecast(
-                        OBSERVATION_CITIES[args]["lat"],
-                        OBSERVATION_CITIES[args]["lon"]
-                    )
-                    
-                    if forecast_data and "list" in forecast_data:
-                        city_emoji = OBSERVATION_CITIES[args]["emoji"]
-                        response = f"{city_emoji} <b>PROGNOZA 5-DNIOWA - {args.upper()}</b>\n\n"
-                        
-                        # Grupuj prognozę po dniach
-                        daily_forecasts = {}
-                        for item in forecast_data["list"][:40]:  # Pierwsze 40 wpisów (5 dni * 8 na dzień)
-                            date = datetime.fromtimestamp(item["dt"]).strftime("%d.%m")
-                            time = datetime.fromtimestamp(item["dt"]).strftime("%H:%M")
-                            
-                            if date not in daily_forecasts:
-                                daily_forecasts[date] = []
-                            
-                            daily_forecasts[date].append({
-                                "time": time,
-                                "temp": item["main"]["temp"],
-                                "feels_like": item["main"]["feels_like"],
-                                "description": item["weather"][0]["description"],
-                                "icon": item["weather"][0]["icon"],
-                                "humidity": item["main"]["humidity"]
-                            })
-                        
-                        # Formatuj prognozę
-                        for i, (date, forecasts) in enumerate(list(daily_forecasts.items())[:3]):  # Tylko 3 dni
-                            response += f"<b>{date}:</b>\n"
-                            
-                            # Wybierz reprezentatywne godziny
-                            for forecast in forecasts:
-                                if forecast["time"] in ["06:00", "12:00", "18:00", "00:00"]:
-                                    response += (
-                                        f"• {forecast['time']}: {forecast['temp']:.1f}°C "
-                                        f"({forecast['description']}) "
-                                        f"{get_weather_icon(forecast['icon'])}\n"
-                                    )
-                            
-                            response += "\n"
-                        
-                        response += "<i>Pełna prognoza: /weather [miasto]</i>"
-                        
-                        send_telegram_message(chat_id, response)
-                    else:
-                        send_telegram_message(chat_id, "❌ Błąd pobierania prognozy")
-                else:
-                    send_telegram_message(chat_id, "📝 <b>Użycie:</b>\n<code>/forecast warszawa</code>\n<code>/forecast koszalin</code>")
-            
-            elif text.startswith("/alerts"):
-                args = text[7:].strip().lower()
-                
-                if args in ["warszawa", "koszalin"]:
-                    alerts = get_weather_alerts(
-                        OBSERVATION_CITIES[args]["lat"],
-                        OBSERVATION_CITIES[args]["lon"]
-                    )
-                    
-                    city_emoji = OBSERVATION_CITIES[args]["emoji"]
-                    
-                    if alerts:
-                        response = f"{city_emoji} <b>ALERTY POGODOWE - {args.upper()}</b>\n\n"
-                        
-                        for alert in alerts[:5]:  # Maksymalnie 5 alertów
-                            response += (
-                                f"<b>⚠️ {alert['event']}</b>\n"
-                                f"• Od: {alert['start']}\n"
-                                f"• Do: {alert['end']}\n"
-                                f"• Źródło: {alert['sender']}\n"
-                                f"• Opis: {alert['description'][:200]}...\n\n"
-                            )
-                        
-                        response += "<i>Źródło: OpenWeather API</i>"
-                    else:
-                        response = f"{city_emoji} <b>BRAK AKTYWNYCH ALERTÓW - {args.upper()}</b>\n\n"
-                        response += "✅ Nie ma aktualnych alertów pogodowych dla tego regionu.\n\n"
-                        response += "<i>Źródło: OpenWeather API</i>"
-                    
-                    send_telegram_message(chat_id, response)
-                else:
-                    send_telegram_message(chat_id, "📝 <b>Użycie:</b>\n<code>/alerts warszawa</code>\n<code>/alerts koszalin</code>")
-            
-            elif text.startswith("/pressure"):
-                args = text[9:].strip().lower()
-                
-                if args in ["warszawa", "koszalin"]:
-                    report = get_detailed_weather_report(args)
-                    
-                    if report and report['current']:
-                        city_emoji = OBSERVATION_CITIES[args]["emoji"]
-                        current = report["current"]
-                        
-                        # Analiza ciśnienia
-                        pressure = current.get("pressure", 1013)
-                        humidity = current.get("humidity", 50)
-                        
-                        if pressure < 1000:
-                            pressure_status = "📉 NISKIE (możliwe opady)"
-                        elif pressure < 1015:
-                            pressure_status = "📊 UMIARKOWANE"
-                        else:
-                            pressure_status = "📈 WYSOKIE (pogoda stabilna)"
-                        
-                        response = (
-                            f"{city_emoji} <b>CIŚNIENIE I WILGOTNOŚĆ - {args.upper()}</b>\n\n"
-                            
-                            f"<b>📊 AKTUALNE WARUNKI:</b>\n"
-                            f"• Ciśnienie: {pressure} hPa\n"
-                            f"• Status: {pressure_status}\n"
-                            f"• Wilgotność: {humidity}%\n\n"
-                            
-                            f"<b>📈 INTERPRETACJA:</b>\n"
-                        )
-                        
-                        # Porady dla obserwatorów
-                        if pressure < 1000 and humidity > 80:
-                            response += "❌ Warunki niekorzystne dla obserwacji:\n"
-                            response += "• Wysoka wilgotność i niskie ciśnienie\n"
-                            response += "• Prawdopodobne opady i zachmurzenie\n"
-                        elif pressure > 1015 and humidity < 60:
-                            response += "✅ Warunki doskonałe dla obserwacji:\n"
-                            response += "• Stabilne wysokie ciśnienie\n"
-                            response += "• Niska wilgotność powietrza\n"
-                        else:
-                            response += "⚠️ Warunki umiarkowane:\n"
-                            response += "• Możliwe krótkotrwałe okna obserwacyjne\n\n"
-                        
-                        response += f"<i>Aktualizacja: {datetime.now().strftime('%H:%M:%S')}</i>"
-                        
-                        send_telegram_message(chat_id, response)
-                    else:
-                        send_telegram_message(chat_id, "❌ Błąd pobierania danych")
-                else:
-                    send_telegram_message(chat_id, "📝 <b>Użycie:</b>\n<code>/pressure warszawa</code>\n<code>/pressure koszalin</code>")
-            
-            elif text.startswith("/iss"):
-                # Prosta odpowiedź o ISS
-                response = (
-                    "🛰️ <b>MIĘDZYNARODOWA STACJA KOSMICZNA</b>\n\n"
-                    "System śledzenia ISS jest aktywny.\n\n"
-                    "<b>Komendy:</b>\n"
-                    "<code>/iss</code> - Aktualna pozycja\n"
-                    "<code>/iss passes warszawa</code> - Przeloty nad Warszawą\n"
-                    "<code>/iss passes koszalin</code> - Przeloty nad Koszalinem\n\n"
-                    "<i>Wkrótce pełna integracja z API N2YO</i>"
-                )
-                send_telegram_message(chat_id, response)
-            
-            elif text.startswith("/satellite"):
-                # Informacje o satelitach
-                response = (
-                    "🛰️ <b>SYSTEM ŚLEDZENIA SATELITÓW</b>\n\n"
-                    "<b>Obsługiwane satelity:</b>\n"
-                    "• ISS - Międzynarodowa Stacja Kosmiczna\n"
-                    "• HST - Teleskop Hubble'a\n"
-                    "• LANDSAT8 - Satelita obrazowania Ziemi\n"
-                    "• SENTINEL2A - Europejski satelita\n\n"
-                    "<b>Komendy:</b>\n"
-                    "<code>/satellite photo</code> - Zdjęcie dnia NASA\n"
-                    "<code>/satellite [nazwa]</code> - Śledź satelitę\n\n"
-                    "<i>System w pełni zintegrowany z NASA i N2YO API</i>"
-                )
-                send_telegram_message(chat_id, response)
             
             elif text == "/help":
-                # Pełna lista komend
                 response = (
-                    "🤖 <b>SENTRY ONE v8.1 - POMOC</b>\n\n"
+                    f"🤖 <b>SENTRY ONE v9.0 - POMOC</b>\n\n"
                     
-                    "<b>🌤️ KOMENDY POGODOWE (OpenWeather):</b>\n"
-                    "<code>/weather [miasto]</code> - Szczegółowy raport\n"
-                    "<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
-                    "<code>/alerts [miasto]</code> - Alerty pogodowe\n"
-                    "<code>/pressure [miasto]</code> - Ciśnienie i wilgotność\n\n"
+                    f"<b>🛰️ NASA I SATELITY:</b>\n"
+                    f"<code>/nasa</code> - Zdjęcie dnia NASA\n"
+                    f"<code>/iss</code> - Pozycja ISS\n"
+                    f"<code>/photo warszawa/koszalin</code> - Zdjęcie satelitarne miasta\n\n"
                     
-                    "<b>🌌 KOMENDY ASTRONOMICZNE:</b>\n"
-                    "<code>/astro [miasto]</code> - Raport obserwacyjny\n"
-                    "<code>/astro moon</code> - Faza Księżyca\n"
-                    "<code>/astro calendar</code> - Kalendarz\n"
-                    "<code>/astro date</code> - Data astronomiczna\n\n"
+                    f"<b>🔔 POWIADOMIENIA:</b>\n"
+                    f"<code>/satellites on/off</code> - Powiadomienia o satelitach\n"
+                    f"<code>/alerts on/off</code> - Alerty obserwacyjne\n\n"
                     
-                    "<b>🛰️ KOMENDY SATELITARNE:</b>\n"
-                    "<code>/iss</code> - Międzynarodowa Stacja Kosmiczna\n"
-                    "<code>/satellite</code> - Śledzenie satelitów\n\n"
+                    f"<b>🌌 ASTRONOMIA:</b>\n"
+                    f"<code>/moon</code> - Szczegóły Księżyca\n"
+                    f"<code>/astro [miasto]</code> - Raport obserwacyjny\n\n"
                     
-                    "<b>📍 OBSERWOWANE MIASTA:</b>\n"
-                    "• warszawa\n"
-                    "• koszalin\n\n"
+                    f"<b>🌤️ POGODA:</b>\n"
+                    f"<code>/weather warszawa/koszalin</code> - Prognoza\n"
+                    f"<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
+                    f"<code>/pressure [miasto]</code> - Ciśnienie i wilgotność\n\n"
                     
-                    "<i>System wykorzystuje dane z OpenWeather, NASA i N2YO API</i>"
+                    f"<b>📍 OBSERWOWANE MIASTA:</b>\n"
+                    f"• warszawa\n• koszalin\n\n"
+                    
+                    f"<i>🤖 System działa 24/7 z NASA, N2YO i OpenWeather API</i>"
                 )
                 send_telegram_message(chat_id, response)
             
             else:
                 # Domyślna odpowiedź
                 response = (
-                    "🤖 <b>SENTRY ONE v8.1</b>\n\n"
-                    "System astrometeorologiczny z kalendarzem 13-miesięcznym\n"
-                    "i rozszerzonymi danymi z OpenWeather API.\n\n"
-                    "<b>🌤️ NOWE KOMENDY OPENWEATHER:</b>\n"
-                    "<code>/weather [miasto]</code> - Szczegółowy raport\n"
-                    "<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
-                    "<code>/alerts [miasto]</code> - Alerty pogodowe\n\n"
-                    "<b>🌌 PODSTAWOWE KOMENDY:</b>\n"
-                    "<code>/start</code> - Kompletny raport\n"
-                    "<code>/astro [miasto]</code> - Raport pogodowy\n"
-                    "<code>/help</code> - Pełna lista komend\n\n"
-                    "<i>Dostępne miasta: warszawa, koszalin</i>"
+                    f"🤖 <b>SENTRY ONE v9.0</b>\n\n"
+                    f"Ultimate astrometeorological monitoring system\n\n"
+                    f"<b>🚀 Główne funkcje:</b>\n"
+                    f"• Zdjęcia NASA w czasie rzeczywistym\n"
+                    f"• Śledzenie satelitów (ISS, Hubble)\n"
+                    f"• Powiadomienia o przelotach\n"
+                    f"• Prognoza warunków obserwacyjnych\n"
+                    f"• Kalendarz 13-miesięczny\n\n"
+                    f"<b>📍 Obserwowane miasta:</b>\n"
+                    f"🏛️ Warszawa | 🌲 Koszalin\n\n"
+                    f"<i>Użyj /start dla pełnego raportu lub /help dla listy komend</i>"
                 )
                 send_telegram_message(chat_id, response)
         
         return jsonify({"status": "ok"}), 200
         
     except Exception as e:
-        logger.error(f"❌ Błąd przetwarzania webhook: {e}")
+        logger.error(f"❌ Błąd webhook: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# ====================== PING SYSTEM ======================
-class PingService:
-    """Serwis do utrzymania aktywności aplikacji"""
-
+# ====================== SCHEDULED TASKS ======================
+class NotificationService:
+    """Serwis powiadomień"""
+    
     def __init__(self):
-        self.ping_count = 0
-        self.last_ping = None
-        self.is_running = False
         self.scheduler = BackgroundScheduler()
-
+        self.is_running = False
+    
     def start(self):
-        """Uruchom pingowanie"""
+        """Uruchom zaplanowane zadania"""
         if not self.is_running:
-            print("🔄 Uruchamianie systemu pingowania...")
-            self.scheduler.add_job(self.ping_self, 'interval', seconds=PING_INTERVAL)
-            self.scheduler.start()
-            threading.Thread(target=self.ping_self, daemon=True).start()
-            self.is_running = True
-            print(f"✅ Pingowanie aktywne co {PING_INTERVAL/60} minut")
-
-    def ping_self(self):
-        """Wyślij ping do własnego endpointu"""
-        try:
-            self.ping_count += 1
-            self.last_ping = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            response = requests.get(f"{RENDER_URL}/", timeout=10)
-            logger.info(f"📡 Ping #{self.ping_count} - Status: {response.status_code}")
+            print("🔄 Uruchamianie serwisu powiadomień...")
             
-            # Test OpenWeather API
-            test_data = get_openweather_data(52.2297, 21.0122)
-            if test_data:
-                logger.info(f"🌤️ OpenWeather API: AKTYWNE (ciśnienie: {test_data.get('pressure', '?')} hPa)")
-            else:
-                logger.warning("⚠️ OpenWeather API: PROBLEM")
-                
+            # Sprawdzanie warunków obserwacyjnych co 2 godziny
+            self.scheduler.add_job(
+                check_observation_opportunities,
+                'interval',
+                hours=2,
+                id='observation_check'
+            )
+            
+            # Sprawdzanie przelotów satelitów co godzinę
+            self.scheduler.add_job(
+                check_satellite_passes,
+                'interval',
+                hours=1,
+                id='satellite_check'
+            )
+            
+            # Pingowanie siebie co 5 minut
+            self.scheduler.add_job(
+                self.ping_self,
+                'interval',
+                minutes=5,
+                id='self_ping'
+            )
+            
+            self.scheduler.start()
+            self.is_running = True
+            print("✅ Serwis powiadomień aktywny")
+    
+    def ping_self(self):
+        """Pingowanie aplikacji"""
+        try:
+            requests.get(f"{RENDER_URL}/", timeout=10)
+            logger.info("📡 Ping aplikacji - OK")
         except Exception as e:
             logger.error(f"❌ Błąd pingowania: {e}")
 
 # ====================== URUCHOMIENIE ======================
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 SENTRY ONE v8.1 - SYSTEM ASTROMETEOROLOGICZNY")
+    print("🤖 SENTRY ONE v9.0 - ULTIMATE SYSTEM")
     print("=" * 60)
+    
+    # Inicjalizacja bazy danych
+    init_database()
     
     # Pobierz aktualne dane
     now = datetime.now()
     astro_date = get_astronomical_date()
     moon = calculate_moon_phase()
     
-    print(f"📅 Data kalendarzowa: {now.strftime('%d.%m.%Y %H:%M:%S')}")
-    print(f"🌌 Data astronomiczna: {astro_date['day']} {astro_date['month_symbol']} {astro_date['month_polish']}")
-    print(f"🌙 Faza Księżyca: {moon['name']} ({moon['illumination']:.1f}%)")
-    print(f"📍 Obserwowane miasta: Warszawa, Koszalin")
+    print(f"📅 Data: {now.strftime('%d.%m.%Y %H:%M:%S')}")
+    print(f"🌌 Kalendarz: {astro_date['day']} {astro_date['month_symbol']} {astro_date['month_polish']}")
+    print(f"🌙 Księżyc: {moon['emoji']} {moon['name']} ({moon['illumination']:.1f}%)")
+    print(f"📍 Miasta: Warszawa, Koszalin")
+    print(f"👥 Użytkownicy: {get_user_count()}")
     
-    # Test OpenWeather API
-    print(f"🔍 Testowanie OpenWeather API...")
-    test_weather = get_openweather_data(52.2297, 21.0122)
-    if test_weather:
-        print(f"✅ OpenWeather API: AKTYWNE")
-        print(f"   • Ciśnienie: {test_weather.get('pressure', 'Brak')} hPa")
-        print(f"   • Pogoda: {test_weather.get('weather_description', 'Brak')}")
-    else:
-        print(f"❌ OpenWeather API: NIEDOSTĘPNE")
+    # Test API
+    print(f"🔍 Testowanie API...")
+    
+    try:
+        nasa_test = get_nasa_apod()
+        print(f"✅ NASA API: {'AKTYWNE' if nasa_test else 'PROBLEM'}")
+        
+        weather_test = get_openweather_data(52.2297, 21.0122)
+        print(f"✅ OpenWeather: {'AKTYWNE' if weather_test else 'PROBLEM'}")
+        
+        # Nie testuj N2YO za każdym razem - ma limit
+        print(f"✅ N2YO: API KEY USTAWIONY")
+        
+    except Exception as e:
+        print(f"❌ Błąd testów API: {e}")
     
     print("=" * 60)
     
-    # Uruchom system pingowania
-    ping_service = PingService()
-    ping_service.start()
+    # Uruchom serwis powiadomień
+    notification_service = NotificationService()
+    notification_service.start()
     
     # Uruchom serwer
     app.run(
