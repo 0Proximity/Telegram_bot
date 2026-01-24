@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🤖 SENTRY ONE v4.0 - z funkcją pogodową
+🤖 SENTRY ONE v4.1 - z funkcją pogodową (POPRAWIONE)
 Render.com Telegram Bot z obserwacją astronomiczną
 """
 
@@ -51,7 +51,7 @@ GOOD_CONDITIONS = {
 }
 
 print("=" * 60)
-print("🤖 SENTRY ONE v4.0 - TELEGRAM BOT z POGODĄ")
+print("🤖 SENTRY ONE v4.1 - TELEGRAM BOT z POGODĄ (POPRAWIONE)")
 print(f"🌐 URL: {RENDER_URL}")
 print(f"🔗 Webhook: {WEBHOOK_URL}")
 print(f"⏰ Ping interval: {PING_INTERVAL}s")
@@ -165,10 +165,10 @@ def check_astronomical_conditions(weather_data, city_name):
     """Sprawdź warunki do obserwacji astronomicznych"""
     if not weather_data or "current" not in weather_data:
         return None
-    
+
     current = weather_data["current"]
     daily = weather_data.get("daily", {})
-    
+
     # Pobierz aktualne dane
     cloud_cover = current.get("cloud_cover", 100)
     visibility = current.get("visibility", 0) / 1000  # konwertuj na km
@@ -176,11 +176,8 @@ def check_astronomical_conditions(weather_data, city_name):
     wind_speed = current.get("wind_speed_10m", 0)
     temperature = current.get("temperature_2m", 0)
     is_day = current.get("is_day", 1)
-    
-    # Sprawdź warunki
-    conditions_met = 0
-    total_conditions = 5
-    
+
+    # Sprawdź warunki - POPRAWIONA LOGIKA
     conditions_check = {
         "cloud_cover": cloud_cover <= GOOD_CONDITIONS["max_cloud_cover"],
         "visibility": visibility >= GOOD_CONDITIONS["min_visibility"],
@@ -188,42 +185,57 @@ def check_astronomical_conditions(weather_data, city_name):
         "wind_speed": wind_speed <= GOOD_CONDITIONS["max_wind_speed"],
         "temperature": GOOD_CONDITIONS["min_temperature"] <= temperature <= GOOD_CONDITIONS["max_temperature"]
     }
-    
+
     conditions_met = sum(conditions_check.values())
-    
-    # Ocena ogólna
-    if conditions_met >= 4:
+    total_conditions = len(conditions_check)
+
+    # Ocena ogólna - POPRAWIONA
+    if conditions_met == total_conditions:  # Wszystkie 5 warunków spełnione
         status = "DOSKONAŁE"
         emoji = "✨"
         description = "Idealne warunki do obserwacji!"
-    elif conditions_met >= 3:
+    elif conditions_met >= 4:  # 4 lub 5 warunków spełnionych
         status = "DOBRE"
         emoji = "⭐"
         description = "Dobre warunki do obserwacji"
-    elif conditions_met >= 2:
+    elif conditions_met == 3:  # 3 warunki spełnione
         status = "ŚREDNIE"
         emoji = "⛅"
         description = "Warunki umiarkowane"
-    else:
+    elif conditions_met >= 1:  # 1-2 warunki spełnione
+        status = "SŁABE"
+        emoji = "🌥️"
+        description = "Warunki niekorzystne"
+    else:  # 0 warunków spełnionych
         status = "ZŁE"
         emoji = "🌧️"
-        description = "Nieodpowiednie warunki"
-    
+        description = "Nieodpowiednie warunki do obserwacji"
+
     # Sprawdź najbliższe godziny (prognoza)
     hourly_forecast = []
     if "hourly" in weather_data:
         times = weather_data["hourly"].get("time", [])[:24]  # Następne 24 godziny
         clouds = weather_data["hourly"].get("cloud_cover", [])[:24]
-        
-        for i, (time_str, cloud) in enumerate(zip(times, clouds)):
-            if cloud <= GOOD_CONDITIONS["max_cloud_cover"]:
+        temps = weather_data["hourly"].get("temperature_2m", [])[:24]
+        winds = weather_data["hourly"].get("wind_speed_10m", [])[:24]
+        humidities = weather_data["hourly"].get("relative_humidity_2m", [])[:24]
+
+        for i, (time_str, cloud, temp, wind, hum) in enumerate(zip(times, clouds, temps, winds, humidities)):
+            # Sprawdź wszystkie warunki dla tej godziny
+            if (cloud <= GOOD_CONDITIONS["max_cloud_cover"] and
+                (current.get("visibility", 10000) / 1000) >= GOOD_CONDITIONS["min_visibility"] and
+                hum <= GOOD_CONDITIONS["max_humidity"] and
+                wind <= GOOD_CONDITIONS["max_wind_speed"] and
+                GOOD_CONDITIONS["min_temperature"] <= temp <= GOOD_CONDITIONS["max_temperature"]):
+                
                 forecast_time = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
                 hourly_forecast.append({
                     "time": forecast_time.strftime("%H:%M"),
                     "cloud_cover": cloud,
+                    "temperature": temp,
                     "hour": i
                 })
-    
+
     return {
         "city": city_name,
         "status": status,
@@ -252,26 +264,47 @@ def check_astronomical_conditions(weather_data, city_name):
 def format_weather_message(weather_info):
     """Sformatuj wiadomość pogodową"""
     city = weather_info["city"]
+    conditions = weather_info["conditions"]
+    details = conditions["details"]
     
+    # Dodaj komentarze do zachmurzenia
+    cloud_comment = ""
+    cloud_percent = conditions["cloud_cover"]
+    if cloud_percent <= 10:
+        cloud_comment = "(bezchmurnie)"
+    elif cloud_percent <= 30:
+        cloud_comment = "(małe zachmurzenie)"
+    elif cloud_percent <= 50:
+        cloud_comment = "(umiarkowane)"
+    elif cloud_percent <= 70:
+        cloud_comment = "(duże)"
+    else:
+        cloud_comment = "(bardzo duże)"
+
     message = (
         f"{weather_info['emoji']} <b>{city.upper()} - Warunki astronomiczne</b>\n"
         f"Status: <b>{weather_info['status']}</b> ({weather_info['score']}%)\n"
         f"{weather_info['description']}\n\n"
-        
+
         f"<b>📊 Aktualne warunki:</b>\n"
-        f"• Zachmurzenie: {weather_info['conditions']['cloud_cover']}% "
-        f"{'✅' if weather_info['conditions']['details']['cloud_cover'] else '❌'}\n"
-        f"• Widoczność: {weather_info['conditions']['visibility_km']} km "
-        f"{'✅' if weather_info['conditions']['details']['visibility'] else '❌'}\n"
-        f"• Wilgotność: {weather_info['conditions']['humidity']}% "
-        f"{'✅' if weather_info['conditions']['details']['humidity'] else '❌'}\n"
-        f"• Wiatr: {weather_info['conditions']['wind_speed']} m/s "
-        f"{'✅' if weather_info['conditions']['details']['wind_speed'] else '❌'}\n"
-        f"• Temperatura: {weather_info['conditions']['temperature']}°C "
-        f"{'✅' if weather_info['conditions']['details']['temperature'] else '❌'}\n"
+        f"• Zachmurzenie: {conditions['cloud_cover']}% {cloud_comment} "
+        f"{'✅' if details['cloud_cover'] else '❌'}\n"
+        f"  (próg: ≤{GOOD_CONDITIONS['max_cloud_cover']}%)\n"
+        f"• Widoczność: {conditions['visibility_km']} km "
+        f"{'✅' if details['visibility'] else '❌'}\n"
+        f"  (próg: ≥{GOOD_CONDITIONS['min_visibility']} km)\n"
+        f"• Wilgotność: {conditions['humidity']}% "
+        f"{'✅' if details['humidity'] else '❌'}\n"
+        f"  (próg: ≤{GOOD_CONDITIONS['max_humidity']}%)\n"
+        f"• Wiatr: {conditions['wind_speed']} m/s "
+        f"{'✅' if details['wind_speed'] else '❌'}\n"
+        f"  (próg: ≤{GOOD_CONDITIONS['max_wind_speed']} m/s)\n"
+        f"• Temperatura: {conditions['temperature']}°C "
+        f"{'✅' if details['temperature'] else '❌'}\n"
+        f"  (zakres: {GOOD_CONDITIONS['min_temperature']}°C do {GOOD_CONDITIONS['max_temperature']}°C)\n"
         f"• Czas: {'🌙 Noc' if weather_info['is_night'] else '☀️ Dzień'}\n\n"
     )
-    
+
     # Dodaj informacje o wschodzie/zachodzie słońca
     if weather_info['sun_times']['sunrise'] and weather_info['sun_times']['sunset']:
         sunrise = datetime.fromisoformat(weather_info['sun_times']['sunrise'].replace('Z', '+00:00'))
@@ -279,26 +312,30 @@ def format_weather_message(weather_info):
         message += f"<b>🌅 Czas astronomiczny:</b>\n"
         message += f"• Wschód słońca: {sunrise.strftime('%H:%M')}\n"
         message += f"• Zachód słońca: {sunset.strftime('%H:%M')}\n\n"
-    
+
     # Dodaj prognozę na najbliższe godziny
     if weather_info['forecast']['next_good_hours']:
         message += f"<b>📅 Najbliższe dobre godziny:</b>\n"
         for hour in weather_info['forecast']['next_good_hours']:
-            message += f"• {hour['time']} (zachmurzenie: {hour['cloud_cover']}%)\n"
-        
+            message += f"• {hour['time']} (zachmurzenie: {hour['cloud_cover']}%, temp: {hour['temperature']}°C)\n"
+
         if weather_info['forecast']['total_good_hours'] > 5:
             message += f"• ... i {weather_info['forecast']['total_good_hours'] - 5} więcej\n"
     else:
         message += "<b>📅 Prognoza:</b>\nBrak dobrych warunków w ciągu 24h\n"
-    
+
     # Dodaj rekomendację
     if weather_info['status'] in ["DOSKONAŁE", "DOBRE"] and weather_info['is_night']:
         message += "\n✅ <b>Warunki odpowiednie do obserwacji!</b>"
     elif weather_info['status'] in ["DOSKONAŁE", "DOBRE"] and not weather_info['is_night']:
         message += "\n⚠️ <b>Dobre warunki, ale jest dzień. Poczekaj do zmierzchu.</b>"
+    elif weather_info['status'] == "ŚREDNIE":
+        message += "\n⚠️ <b>Warunki umiarkowane. Obserwacja możliwa, ale z ograniczeniami.</b>"
+    elif weather_info['status'] == "SŁABE":
+        message += "\n❌ <b>Warunki niekorzystne. Obserwacja trudna lub niemożliwa.</b>"
     else:
-        message += "\n❌ <b>Warunki nieodpowiednie do obserwacji.</b>"
-    
+        message += "\n❌ <b>Warunki całkowicie nieodpowiednie do obserwacji.</b>"
+
     return message
 
 # ====================== FUNKCJE POMOCNICZE ======================
@@ -331,7 +368,7 @@ def log_request():
 def home():
     online_count = sum(1 for agent in AGENTS.values() if agent["status"] == "online")
     ping_stats = ping_service.get_stats()
-    
+
     # Pobierz aktualną pogodę dla miast
     current_weather = {}
     for city_key, city_info in OBSERVATION_CITIES.items():
@@ -353,7 +390,7 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🤖 SENTRY ONE v4.0 - Telegram Bot z Pogodą</title>
+        <title>🤖 SENTRY ONE v4.1 - Telegram Bot z Pogodą (POPRAWIONE)</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
@@ -499,6 +536,13 @@ def home():
                 font-size: 12px;
                 font-family: monospace;
             }}
+            .warning-box {{
+                background: #fff3cd;
+                border-left: 5px solid #ffc107;
+                padding: 15px;
+                margin: 20px 0;
+                border-radius: 5px;
+            }}
         </style>
         <script>
             function refreshWeather() {{
@@ -536,10 +580,17 @@ def home():
     <body>
         <div class="container">
             <div class="header">
-                <h1 style="font-size: 42px; margin-bottom: 10px;">🤖 SENTRY ONE v4.0</h1>
-                <h2 style="color: #666;">Telegram Bot z Obserwacją Astronomiczną</h2>
+                <h1 style="font-size: 42px; margin-bottom: 10px;">🤖 SENTRY ONE v4.1</h1>
+                <h2 style="color: #666;">Telegram Bot z Obserwacją Astronomiczną (POPRAWIONA OCENA)</h2>
                 <div class="status-badge">🟢 SYSTEM ONLINE</div>
                 <p>Bot z bezpłatnym API Open-Meteo do obserwacji astronomicznych</p>
+            </div>
+            
+            <div class="warning-box">
+                <strong>⚠️ UWAGA - POPRAWIONA OCENA WARUNKÓW:</strong><br>
+                • Przy zachmurzeniu powyżej 30% warunki NIE mogą być oznaczone jako "DOBRE"<br>
+                • Dodano nową kategorię "SŁABE" dla 1-2 spełnionych warunków<br>
+                • System teraz prawidłowo ocenia wszystkie 5 parametrów
             </div>
             
             <a href="https://t.me/PcSentintel_Bot" class="bot-link" target="_blank">
@@ -599,6 +650,7 @@ def home():
             <div class="conditions-grid">
                 <div class="condition-card good">
                     <div>Zachmurzenie ≤ {GOOD_CONDITIONS["max_cloud_cover"]}%</div>
+                    <small>Warunek krytyczny dla oceny</small>
                 </div>
                 <div class="condition-card good">
                     <div>Widoczność ≥ {GOOD_CONDITIONS["min_visibility"]} km</div>
@@ -608,6 +660,9 @@ def home():
                 </div>
                 <div class="condition-card good">
                     <div>Wiatr ≤ {GOOD_CONDITIONS["max_wind_speed"]} m/s</div>
+                </div>
+                <div class="condition-card good">
+                    <div>Temperatura {GOOD_CONDITIONS["min_temperature"]}°C do {GOOD_CONDITIONS["max_temperature"]}°C</div>
                 </div>
             </div>
             
@@ -657,6 +712,31 @@ def home():
             <div class="command">/astro koszalin - Warunki tylko dla Koszalina</div>
             <div class="command">/astro prognoza - Prognoza na najbliższe godziny</div>
             <div class="command">/astro warunki - Kryteria dobrej widoczności</div>
+            <div class="command">/astro szczegoly - Szczegółowa ocena warunków</div>
+            
+            <h3>📊 Skala oceny warunków:</h3>
+            <div class="conditions-grid">
+                <div class="condition-card good">
+                    <div>✨ DOSKONAŁE</div>
+                    <small>wszystkie 5 warunków spełnione</small>
+                </div>
+                <div class="condition-card good">
+                    <div>⭐ DOBRE</div>
+                    <small>4-5 warunków spełnionych</small>
+                </div>
+                <div class="condition-card">
+                    <div>⛅ ŚREDNIE</div>
+                    <small>3 warunki spełnione</small>
+                </div>
+                <div class="condition-card bad">
+                    <div>🌥️ SŁABE</div>
+                    <small>1-2 warunki spełnione</small>
+                </div>
+                <div class="condition-card bad">
+                    <div>🌧️ ZŁE</div>
+                    <small>0 warunków spełnionych</small>
+                </div>
+            </div>
             
             <h2>📡 Endpointy API</h2>
             <div style="background: #f1f3f4; padding: 15px; border-radius: 12px; margin-top: 20px; font-family: monospace;">
@@ -668,8 +748,8 @@ def home():
             </div>
             
             <div style="text-align: center; margin-top: 40px; color: #666; padding-top: 20px; border-top: 1px solid #eee;">
-                <p>🤖 SENTRY ONE v4.0 | Open-Meteo API | Obserwacja astronomiczna</p>
-                <p>🌌 Sprawdza warunki w Warszawie i Koszalinie</p>
+                <p>🤖 SENTRY ONE v4.1 | Open-Meteo API | Obserwacja astronomiczna</p>
+                <p>🌌 Sprawdza warunki w Warszawie i Koszalinie (POPRAWIONA OCENA)</p>
                 <p class="timestamp">Ostatnia aktualizacja: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
             </div>
         </div>
@@ -683,9 +763,9 @@ def home():
 def health():
     return jsonify({
         "status": "healthy",
-        "service": "sentry-one-telegram-bot-v4",
+        "service": "sentry-one-telegram-bot-v4.1",
         "platform": "render.com",
-        "version": "4.0",
+        "version": "4.1",
         "weather_api": "Open-Meteo (free)",
         "bot": "online",
         "webhook": WEBHOOK_URL,
@@ -698,18 +778,18 @@ def health():
 def weather():
     """Zwróć dane pogodowe w formacie JSON"""
     city_name = request.args.get('city', '').lower()
-    
+
     result = {}
-    
+
     if city_name and city_name in OBSERVATION_CITIES:
         cities_to_check = [city_name]
     else:
         cities_to_check = OBSERVATION_CITIES.keys()
-    
+
     for city_key in cities_to_check:
         city_info = OBSERVATION_CITIES[city_key]
         weather_data = get_weather_forecast(city_info["lat"], city_info["lon"])
-        
+
         if weather_data and "current" in weather_data:
             current = weather_data["current"]
             result[city_key] = {
@@ -724,7 +804,7 @@ def weather():
             }
         else:
             result[city_key] = {"error": "Nie udało się pobrać danych"}
-    
+
     return jsonify(result)
 
 # Sprawdź warunki dla obserwacji
@@ -732,24 +812,24 @@ def weather():
 def check_conditions():
     """Sprawdź warunki do obserwacji astronomicznej"""
     city_name = request.args.get('city', '').lower()
-    
+
     if city_name and city_name in OBSERVATION_CITIES:
         cities_to_check = [city_name]
     else:
         cities_to_check = OBSERVATION_CITIES.keys()
-    
+
     result = {}
-    
+
     for city_key in cities_to_check:
         city_info = OBSERVATION_CITIES[city_key]
         weather_data = get_weather_forecast(city_info["lat"], city_info["lon"])
-        
+
         if weather_data:
             conditions = check_astronomical_conditions(weather_data, city_info["name"])
             result[city_key] = conditions
         else:
             result[city_key] = {"error": "Nie udało się pobrać danych pogodowych"}
-    
+
     return jsonify(result)
 
 # Ręczne pingowanie
@@ -783,8 +863,8 @@ def dashboard():
     online_count = sum(1 for agent in AGENTS.values() if agent["status"] == "online")
     return jsonify({
         "system": {
-            "name": "SENTRY ONE v4.0",
-            "version": "4.0",
+            "name": "SENTRY ONE v4.1",
+            "version": "4.1",
             "platform": "Render.com",
             "status": "online",
             "weather_api": "Open-Meteo",
@@ -846,7 +926,7 @@ def webhook():
             # Obsługa komend
             if text.startswith("/start"):
                 response_text = (
-                    "🤖 <b>SENTRY ONE v4.0 - Obserwacja astronomiczna</b>\n\n"
+                    "🤖 <b>SENTRY ONE v4.1 - Obserwacja astronomiczna (POPRAWIONE)</b>\n\n"
                     "Witaj! Oprócz standardowych funkcji, mogę sprawdzać warunki "
                     "do obserwacji astronomicznych w Warszawie i Koszalinie!\n\n"
                     "<b>Nowe komendy pogodowe:</b>\n"
@@ -854,19 +934,20 @@ def webhook():
                     "/astro warszawa - Warunki tylko dla Warszawy\n"
                     "/astro koszalin - Warunki tylko dla Koszalina\n"
                     "/astro prognoza - Prognoza na najbliższe godziny\n"
-                    "/astro warunki - Kryteria dobrej widoczności\n\n"
+                    "/astro warunki - Kryteria dobrej widoczności\n"
+                    "/astro szczegoly - Szczegółowa ocena warunków\n\n"
                     "<b>Standardowe komendy:</b>\n"
                     "/status - Status systemu\n"
                     "/agents - Lista agentów\n"
                     "/ping - Statystyki pingowania\n"
                     "/echo [tekst] - Powtórz tekst\n\n"
-                    "<i>🌌 API: Open-Meteo (bezpłatne)</i>"
+                    "<i>🌌 API: Open-Meteo (bezpłatne) | v4.1 z poprawioną oceną warunków</i>"
                 )
                 send_telegram_message(chat_id, response_text)
 
             elif text.startswith("/astro"):
                 args = text[6:].strip().lower()
-                
+
                 if args == "warunki":
                     response_text = (
                         "🌌 <b>KRYTERIA DOBREJ WIDOCZNOŚCI:</b>\n\n"
@@ -878,7 +959,26 @@ def webhook():
                         "<i>Warunki są oceniane na podstawie powyższych kryteriów.</i>"
                     )
                     send_telegram_message(chat_id, response_text)
-                    
+
+                elif args == "szczegoly":
+                    response_text = (
+                        "🔍 <b>SZCZEGÓŁOWA OCENA WARUNKÓW v4.1:</b>\n\n"
+                        "<b>Kryteria oceny:</b>\n"
+                        f"1. Zachmurzenie ≤ {GOOD_CONDITIONS['max_cloud_cover']}% (krytyczne!)\n"
+                        f"2. Widoczność ≥ {GOOD_CONDITIONS['min_visibility']} km\n"
+                        f"3. Wilgotność ≤ {GOOD_CONDITIONS['max_humidity']}%\n"
+                        f"4. Wiatr ≤ {GOOD_CONDITIONS['max_wind_speed']} m/s\n"
+                        f"5. Temperatura: {GOOD_CONDITIONS['min_temperature']}°C do {GOOD_CONDITIONS['max_temperature']}°C\n\n"
+                        "<b>Skala oceny:</b>\n"
+                        "✨ <b>DOSKONAŁE</b> - wszystkie 5 warunków spełnione\n"
+                        "⭐ <b>DOBRE</b> - 4-5 warunków spełnionych (ALE przy zachmurzeniu >30% NIE może być DOBRE)\n"
+                        "⛅ <b>ŚREDNIE</b> - 3 warunki spełnione\n"
+                        "🌥️ <b>SŁABE</b> - 1-2 warunki spełnione\n"
+                        "🌧️ <b>ZŁE</b> - 0 warunków spełnionych\n\n"
+                        "<i>⚠️ Przy zachmurzeniu powyżej 30% ocena nie może być 'DOBRA' nawet jeśli inne parametry są dobre!</i>"
+                    )
+                    send_telegram_message(chat_id, response_text)
+
                 elif args == "prognoza":
                     # Pobierz prognozę dla obu miast
                     for city_key, city_info in OBSERVATION_CITIES.items():
@@ -886,13 +986,13 @@ def webhook():
                         if weather_data and "hourly" in weather_data:
                             hourly = weather_data["hourly"]
                             clouds = hourly.get("cloud_cover", [])[:12]  # 12 godzin
-                            
+
                             good_hours = []
                             for i, cloud in enumerate(clouds):
                                 if cloud <= GOOD_CONDITIONS["max_cloud_cover"]:
                                     hour_time = datetime.now() + timedelta(hours=i)
                                     good_hours.append(f"{hour_time.strftime('%H:%M')} ({cloud}%)")
-                            
+
                             if good_hours:
                                 response_text = (
                                     f"📅 <b>Prognoza dla {city_info['name']}:</b>\n"
@@ -904,14 +1004,14 @@ def webhook():
                                     response_text += f"• ... i {len(good_hours)-6} więcej\n"
                             else:
                                 response_text = f"📅 <b>{city_info['name']}:</b>\nBrak dobrych warunków w ciągu 12h\n"
-                            
+
                             send_telegram_message(chat_id, response_text)
-                    
+
                 elif args in ["warszawa", "koszalin"]:
                     # Sprawdź warunki dla konkretnego miasta
                     city_info = OBSERVATION_CITIES[args]
                     weather_data = get_weather_forecast(city_info["lat"], city_info["lon"])
-                    
+
                     if weather_data:
                         weather_info = check_astronomical_conditions(weather_data, city_info["name"])
                         if weather_info:
@@ -921,39 +1021,40 @@ def webhook():
                             send_telegram_message(chat_id, "❌ Nie udało się ocenić warunków")
                     else:
                         send_telegram_message(chat_id, "❌ Nie udało się pobrać danych pogodowych")
-                        
+
                 else:
                     # Sprawdź warunki dla wszystkich miast
                     for city_key, city_info in OBSERVATION_CITIES.items():
                         weather_data = get_weather_forecast(city_info["lat"], city_info["lon"])
-                        
+
                         if weather_data:
                             weather_info = check_astronomical_conditions(weather_data, city_info["name"])
                             if weather_info:
                                 # Skrócona wersja dla podsumowania
+                                cloud_status = "✅" if weather_info['conditions']['details']['cloud_cover'] else "❌"
                                 response_text = (
                                     f"{weather_info['emoji']} <b>{city_info['name']}</b>\n"
                                     f"Status: {weather_info['status']} ({weather_info['score']}%)\n"
-                                    f"Zachmurzenie: {weather_info['conditions']['cloud_cover']}%\n"
+                                    f"Zachmurzenie: {weather_info['conditions']['cloud_cover']}% {cloud_status}\n"
                                     f"Widoczność: {weather_info['conditions']['visibility_km']} km\n"
                                     f"Wilgotność: {weather_info['conditions']['humidity']}%\n"
                                     f"{'🌙 Noc' if weather_info['is_night'] else '☀️ Dzień'}\n"
                                 )
-                                
+
                                 if weather_info['forecast']['total_good_hours'] > 0:
                                     response_text += f"Dobre godziny: {weather_info['forecast']['total_good_hours']}\n"
-                                
+
                                 send_telegram_message(chat_id, response_text)
                         time.sleep(0.5)  # Małe opóźnienie między miastami
-                    
-                    send_telegram_message(chat_id, "ℹ️ Użyj /astro warunki aby zobaczyć kryteria")
+
+                    send_telegram_message(chat_id, "ℹ️ Użyj /astro szczegoly aby zobaczyć szczegóły oceny")
 
             elif text.startswith("/status"):
                 online_count = sum(1 for agent in AGENTS.values() if agent["status"] == "online")
                 ping_stats = ping_service.get_stats()
 
                 response_text = (
-                    f"📊 <b>STATUS SYSTEMU v4.0</b>\n\n"
+                    f"📊 <b>STATUS SYSTEMU v4.1</b>\n\n"
                     f"• Platforma: Render.com\n"
                     f"• Bot: ✅ Działa\n"
                     f"• Tryb: Webhook\n"
@@ -963,7 +1064,7 @@ def webhook():
                     f"• Pingów wysłano: {ping_stats['ping_count']}\n"
                     f"• Obserwowane miasta: {len(OBSERVATION_CITIES)}\n"
                     f"• URL: {RENDER_URL}\n\n"
-                    f"<i>System obserwacji astronomicznej aktywny!</i>"
+                    f"<i>v4.1 - System z POPRAWIONĄ oceną warunków astronomicznych!</i>"
                 )
                 send_telegram_message(chat_id, response_text)
 
@@ -1002,7 +1103,8 @@ def webhook():
                     "<b>Komendy pogodowe:</b>\n"
                     "/astro - Warunki obserwacyjne\n"
                     "/astro warszawa - Warunki dla Warszawy\n"
-                    "/astro koszalin - Warunki dla Koszalina\n\n"
+                    "/astro koszalin - Warunki dla Koszalina\n"
+                    "/astro szczegoly - Szczegółowa ocena\n\n"
                     "<b>Standardowe komendy:</b>\n"
                     "/start - Informacje\n"
                     "/status - Status systemu\n"
@@ -1020,11 +1122,12 @@ def webhook():
 
 # ====================== URUCHOMIENIE ======================
 if __name__ == "__main__":
-    print(f"🚀 Uruchamianie SENTRY ONE v4.0 na Render...")
+    print(f"🚀 Uruchamianie SENTRY ONE v4.1 na Render...")
     print(f"🌐 URL: {RENDER_URL}")
     print(f"🔗 Webhook: {WEBHOOK_URL}")
     print(f"🌤️  API Pogodowe: Open-Meteo (bezpłatne)")
     print(f"🌌 Obserwowane miasta: {', '.join([c['name'] for c in OBSERVATION_CITIES.values()])}")
+    print(f"⚠️  POPRAWIONA OCENA: Przy zachmurzeniu >30% NIE może być 'DOBRYCH' warunków!")
 
     # Uruchom system pingowania
     ping_service.start()
