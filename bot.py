@@ -58,6 +58,30 @@ OBSERVATION_CITIES = {
     }
 }
 
+# Satelity do śledzenia
+SATELLITES = {
+    "iss": {
+        "name": "Międzynarodowa Stacja Kosmiczna (ISS)",
+        "norad_id": 25544,
+        "emoji": "🛰️"
+    },
+    "hubble": {
+        "name": "Teleskop Hubble'a (HST)",
+        "norad_id": 20580,
+        "emoji": "🔭"
+    },
+    "landsat": {
+        "name": "Landsat 8",
+        "norad_id": 39084,
+        "emoji": "🛰️"
+    },
+    "sentinel": {
+        "name": "Sentinel-2A",
+        "norad_id": 40697,
+        "emoji": "🛰️"
+    }
+}
+
 # Warunki dobrej widoczności
 VISIBILITY_THRESHOLDS = {
     "excellent": {"min": 80, "emoji": "✨", "name": "DOSKONAŁE"},
@@ -317,6 +341,92 @@ def get_openweather_alerts(lat, lon):
         return alerts[:3]  # Maksymalnie 3 alerty
     except Exception as e:
         logger.error(f"❌ Błąd alertów: {e}")
+        return []
+
+def get_nasa_apod():
+    """Pobierz zdjęcie dnia NASA (Astronomy Picture of the Day)"""
+    try:
+        url = NASA_APOD_URL
+        params = {
+            "api_key": NASA_API_KEY,
+            "hd": True
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code != 200:
+            return None
+        
+        return {
+            "title": data.get("title", "Brak tytułu"),
+            "explanation": data.get("explanation", "Brak opisu"),
+            "url": data.get("url", ""),
+            "hd_url": data.get("hdurl", data.get("url", "")),
+            "date": data.get("date", ""),
+            "copyright": data.get("copyright", "NASA")
+        }
+    except Exception as e:
+        logger.error(f"❌ Błąd NASA APOD: {e}")
+        return None
+
+def get_iss_position():
+    """Pobierz aktualną pozycję ISS z N2YO API"""
+    try:
+        url = f"{N2YO_URL}/positions/25544/{OBSERVATION_CITIES['warszawa']['lat']}/{OBSERVATION_CITIES['warszawa']['lon']}/0/2/"
+        params = {
+            "apiKey": N2YO_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code != 200:
+            return None
+        
+        positions = data.get("positions", [])
+        if positions:
+            pos = positions[0]
+            return {
+                "latitude": pos.get("satlatitude", 0),
+                "longitude": pos.get("satlongitude", 0),
+                "altitude": pos.get("sataltitude", 0),
+                "velocity": pos.get("satvelocity", 0),
+                "timestamp": datetime.now().strftime("%H:%M:%S")
+            }
+        return None
+    except Exception as e:
+        logger.error(f"❌ Błąd ISS API: {e}")
+        return None
+
+def get_satellite_passes(satellite_id, lat, lon):
+    """Pobierz przeloty satelity nad daną lokalizacją"""
+    try:
+        url = f"{N2YO_URL}/visualpasses/{satellite_id}/{lat}/{lon}/0/2/5/"
+        params = {
+            "apiKey": N2YO_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code != 200 or "passes" not in data:
+            return []
+        
+        passes = []
+        for pass_info in data["passes"][:5]:  # Maksymalnie 5 przelotów
+            passes.append({
+                "startUTC": pass_info.get("startUTC", 0),
+                "startTime": datetime.fromtimestamp(pass_info.get("startUTC", 0)).strftime("%H:%M"),
+                "endTime": datetime.fromtimestamp(pass_info.get("endUTC", 0)).strftime("%H:%M"),
+                "duration": pass_info.get("duration", 0),
+                "maxElevation": pass_info.get("maxElevation", 0),
+                "mag": pass_info.get("mag", 0)
+            })
+        
+        return passes
+    except Exception as e:
+        logger.error(f"❌ Błąd przelotów satelity: {e}")
         return []
 
 # ====================== FUNKCJE ASTRONOMICZNE ======================
@@ -665,6 +775,100 @@ def generate_calendar_report():
     
     return report
 
+def generate_iss_report():
+    """Wygeneruj raport o ISS"""
+    iss_position = get_iss_position()
+    
+    report = ""
+    report += create_beautiful_header("MIĘDZYNARODOWA STACJA KOSMICZNA (ISS)", "🛰️")
+    
+    if iss_position:
+        report += create_section("📍 AKTUALNA POZYCJA", "🌍")
+        report += create_info_line("Szerokość geogr.", f"{iss_position['latitude']:.2f}°")
+        report += create_info_line("Długość geogr.", f"{iss_position['longitude']:.2f}°")
+        report += create_info_line("Wysokość", f"{iss_position['altitude']:.2f} km")
+        report += create_info_line("Prędkość", f"{iss_position['velocity']:.2f} km/h")
+        
+        # Dodaj informacje o przelotach nad miastami
+        report += create_section("🔭 NAJBLIŻSZE PRZELOTY", "⏱️")
+        
+        for city_key, city in OBSERVATION_CITIES.items():
+            passes = get_satellite_passes(25544, city["lat"], city["lon"])
+            if passes:
+                report += f"\n<b>{city['emoji']} {city['name']}:</b>\n"
+                for p in passes[:2]:  # Dwa najbliższe przeloty
+                    report += f"• {p['startTime']} - {p['endTime']} (max: {p['maxElevation']:.0f}°)\n"
+    else:
+        report += "❌ <b>Nie udało się pobrać danych o ISS</b>\n"
+        report += "Spróbuj ponownie za chwilę.\n"
+    
+    # Dodatkowe informacje
+    report += create_section("📊 INFORMACJE O ISS", "ℹ️")
+    report += "• <b>Prędkość orbitalna:</b> 27,600 km/h\n"
+    report += "• <b>Wysokość orbity:</b> ~400 km\n"
+    report += "• <b>Okres orbitalny:</b> 90 minut\n"
+    report += "• <b>Załoga:</b> 7 astronautów\n"
+    report += "• <b>Start:</b> 20 listopada 1998\n"
+    
+    report += f"\n{'═' * 40}\n"
+    report += f"<i>🛰️ Dane: N2YO API | {datetime.now().strftime('%H:%M:%S')}</i>"
+    
+    return report
+
+def generate_satellites_report():
+    """Wygeneruj raport o satelitach"""
+    report = ""
+    report += create_beautiful_header("SYSTEM ŚLEDZENIA SATELITÓW", "🛰️")
+    
+    report += create_section("📡 DOSTĘPNE SATELITY", "✨")
+    
+    for sat_id, sat_info in SATELLITES.items():
+        report += f"• {sat_info['emoji']} <b>{sat_info['name']}</b>\n"
+        report += f"  ID: {sat_info['norad_id']}\n"
+    
+    report += create_section("🎯 JAK OBSERWOWAĆ", "🔭")
+    report += "1. Sprawdź przeloty nad Twoją lokalizacją\n"
+    report += "2. Wybierz satelitę z dobrej widocznością\n"
+    report += "3. Sprawdź warunki pogodowe\n"
+    report += "4. Bądź gotowy 5 minut przed przelotem\n"
+    
+    report += create_section("📝 PRZYKŁADOWE KOMENDY", "💡")
+    report += "<code>/iss</code> - Aktualna pozycja ISS\n"
+    report += "<code>/satellites passes warszawa</code> - Przeloty nad Warszawą\n"
+    report += "<code>/satellites photo</code> - Zdjęcie dnia NASA\n"
+    
+    report += f"\n{'═' * 40}\n"
+    report += f"<i>🛰️ System śledzenia satelitów | COSMOS SENTRY v1.0</i>"
+    
+    return report
+
+def generate_nasa_photo_report():
+    """Wygeneruj raport ze zdjęciem NASA"""
+    apod_data = get_nasa_apod()
+    
+    report = ""
+    report += create_beautiful_header("ZDJĘCIE DNIA NASA", "🛰️")
+    
+    if apod_data and apod_data.get("url"):
+        report += f"\n📅 <b>Data:</b> {apod_data['date']}\n"
+        report += f"📸 <b>Tytuł:</b> {apod_data['title']}\n"
+        report += f"👨‍🚀 <b>Autor:</b> {apod_data['copyright']}\n\n"
+        
+        # Skrócony opis (pierwsze 200 znaków)
+        short_desc = apod_data['explanation'][:200] + "..." if len(apod_data['explanation']) > 200 else apod_data['explanation']
+        report += f"📝 <b>Opis:</b> {short_desc}\n\n"
+        
+        # Link do zdjęcia
+        report += f"🔗 <b>Link do zdjęcia:</b>\n{apod_data['url']}\n"
+    else:
+        report += "❌ <b>Nie udało się pobrać zdjęcia dnia NASA</b>\n"
+        report += "Spróbuj ponownie za chwilę.\n"
+    
+    report += f"\n{'═' * 40}\n"
+    report += f"<i>🛰️ NASA Astronomy Picture of the Day | {datetime.now().strftime('%H:%M:%S')}</i>"
+    
+    return report
+
 # ====================== FLASK APP ======================
 app = Flask(__name__)
 
@@ -753,7 +957,7 @@ def home():
             <div class="header">
                 <h1 class="title">🌌 COSMOS SENTRY v1.0</h1>
                 <h2 style="color: #81ecec;">Zaawansowany System Astrometeorologiczny</h2>
-                <div class="status-badge">🟢 SYSTEM AKTYWNY | OpenWeather API</div>
+                <div class="status-badge">🟢 SYSTEM AKTYWNY | OpenWeather API | NASA API | N2YO Satellites</div>
                 <h2>📅 {now.strftime("%d.%m.%Y %H:%M")}</h2>
             </div>
             
@@ -769,6 +973,10 @@ def home():
                 <div class="feature-card">
                     <h3>🌙 Fazy Księżyca</h3>
                     <p>Precyzyjne obliczenia faz księżycowych i oświetlenia</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🛰️ Śledzenie Satelitów</h3>
+                    <p>Monitorowanie ISS i innych satelitów w czasie rzeczywistym</p>
                 </div>
             </div>
             
@@ -828,8 +1036,9 @@ def webhook():
                     f"• 🌤️ <b>Prognoza obserwacyjna</b> z OpenWeather\n"
                     f"• 📅 <b>Kalendarz 13-miesięczny</b>\n"
                     f"• 🌙 <b>Fazy Księżyca</b> z dokładnością\n"
-                    f"• 🛰️ <b>Śledzenie satelitów</b>\n"
-                    f"• ⚡ <b>Alerty pogodowe</b>\n\n"
+                    f"• 🛰️ <b>Śledzenie satelitów</b> (ISS, Hubble, Landsat)\n"
+                    f"• ⚡ <b>Alerty pogodowe</b>\n"
+                    f"• 📸 <b>Zdjęcia NASA</b> (APOD)\n\n"
                     
                     f"{create_section('🎯 KOMENDY', '📱')}"
                     f"<code>/astro warszawa</code> - Pełny raport\n"
@@ -837,8 +1046,12 @@ def webhook():
                     f"<code>/astro krakow</code> - Pełny raport\n"
                     f"<code>/moon</code> - Raport księżycowy\n"
                     f"<code>/calendar</code> - Kalendarz astronomiczny\n"
+                    f"<code>/iss</code> - Pozycja ISS\n"
+                    f"<code>/satellites</code> - System śledzenia satelitów\n"
+                    f"<code>/nasa</code> - Zdjęcie dnia NASA\n"
                     f"<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
                     f"<code>/alerts [miasto]</code> - Alerty pogodowe\n"
+                    f"<code>/weather [miasto]</code> - Aktualna pogoda\n"
                     f"<code>/help</code> - Pomoc\n\n"
                     
                     f"{'═' * 40}\n"
@@ -869,6 +1082,56 @@ def webhook():
                 report = generate_calendar_report()
                 send_telegram_message(chat_id, report)
             
+            # Komenda /iss
+            elif text == "/iss":
+                report = generate_iss_report()
+                send_telegram_message(chat_id, report)
+            
+            # Komenda /satellites
+            elif text == "/satellites":
+                report = generate_satellites_report()
+                send_telegram_message(chat_id, report)
+            
+            # Komenda /nasa
+            elif text == "/nasa":
+                report = generate_nasa_photo_report()
+                send_telegram_message(chat_id, report)
+            
+            # Komenda /weather
+            elif text.startswith("/weather"):
+                args = text[8:].strip()
+                
+                if not args:
+                    args = "warszawa"
+                
+                if args in OBSERVATION_CITIES:
+                    city = OBSERVATION_CITIES[args]
+                    weather_data = get_openweather_data(city["lat"], city["lon"])
+                    
+                    if weather_data:
+                        city_name_upper = city["name"].upper()
+                        report = create_beautiful_header(f"POGODA - {city_name_upper}", city['emoji'])
+                        
+                        report += create_section("🌤️ AKTUALNA POGODA", get_weather_icon(weather_data["icon"]))
+                        report += create_info_line("Stan", f"{weather_data['description'].capitalize()}")
+                        report += create_info_line("Temperatura", f"{weather_data['temp']:.1f}°C")
+                        report += create_info_line("Odczuwalna", f"{weather_data['feels_like']:.1f}°C")
+                        report += create_info_line("Wilgotność", f"{weather_data['humidity']}%")
+                        report += create_info_line("Ciśnienie", f"{weather_data['pressure']} hPa")
+                        report += create_info_line("Wiatr", f"{weather_data['wind_speed']} m/s")
+                        report += create_info_line("Zachmurzenie", f"{weather_data['clouds']}%")
+                        report += create_info_line("Widoczność", f"{weather_data['visibility']:.1f} km")
+                        report += create_info_line("Słońce", f"↑ {weather_data['sunrise']} | ↓ {weather_data['sunset']}")
+                        
+                        report += f"\n{'═' * 40}\n"
+                        report += f"<i>🌤️ OpenWeather API | {weather_data['timestamp']}</i>"
+                        
+                        send_telegram_message(chat_id, report)
+                    else:
+                        send_telegram_message(chat_id, "❌ Nie udało się pobrać danych pogodowych")
+                else:
+                    send_telegram_message(chat_id, "❌ Nieznane miasto. Dostępne: warszawa, koszalin, krakow")
+            
             # Komenda /forecast
             elif text.startswith("/forecast"):
                 args = text[9:].strip()
@@ -881,7 +1144,6 @@ def webhook():
                     forecast = get_openweather_forecast(city["lat"], city["lon"])
                     
                     if forecast:
-                        # POPRAWIAM PROBLEMATYCZNĄ LINIĘ - używam konkatenacji zamiast zagnieżdżonych cudzysłowów
                         city_name_upper = city["name"].upper()
                         report = create_beautiful_header(f"PROGNOZA 5-DNIOWA - {city_name_upper}", city['emoji'])
                         
@@ -919,7 +1181,6 @@ def webhook():
                     city = OBSERVATION_CITIES[args]
                     alerts = get_openweather_alerts(city["lat"], city["lon"])
                     
-                    # POPRAWIAM PROBLEMATYCZNĄ LINIĘ - używam konkatenacji zamiast zagnieżdżonych cudzysłowów
                     city_name_upper = city["name"].upper()
                     report = create_beautiful_header(f"ALERTY POGODOWE - {city_name_upper}", '⚠️')
                     
@@ -958,14 +1219,15 @@ def webhook():
                     f"<code>/calendar</code> - Kalendarz 13-miesięczny\n"
                     f"<code>/date</code> - Aktualna data astronomiczna\n\n"
                     
-                    f"{create_section('🌤️ KOMENDY POGODOWE', '⛅')}"
-                    f"<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
-                    f"<code>/alerts [miasto]</code> - Alerty pogodowe\n"
-                    f"<code>/weather [miasto]</code> - Aktualna pogoda\n\n"
-                    
                     f"{create_section('🛰️ KOMENDY SATELITARNE', '📡')}"
                     f"<code>/iss</code> - Międzynarodowa Stacja Kosmiczna\n"
-                    f"<code>/satellites</code> - Śledzenie satelitów\n\n"
+                    f"<code>/satellites</code> - System śledzenia satelitów\n"
+                    f"<code>/nasa</code> - Zdjęcie dnia NASA\n\n"
+                    
+                    f"{create_section('🌤️ KOMENDY POGODOWE', '⛅')}"
+                    f"<code>/weather [miasto]</code> - Aktualna pogoda\n"
+                    f"<code>/forecast [miasto]</code> - Prognoza 5-dniowa\n"
+                    f"<code>/alerts [miasto]</code> - Alerty pogodowe\n\n"
                     
                     f"{'═' * 40}\n"
                     f"<i>🌌 Wersja: 1.0 | API: OpenWeather, NASA, N2YO</i>\n"
@@ -1041,6 +1303,7 @@ if __name__ == "__main__":
     print(f"🌙 Księżyc: {moon['name']} ({moon['illumination']}%)")
     print(f"♑ Kalendarz: {astro_date['day']} {astro_date['symbol']} {astro_date['month']}")
     print(f"📍 Miasta: {', '.join([c['name'] for c in OBSERVATION_CITIES.values()])}")
+    print(f"🛰️ Satelity: {', '.join([s['name'] for s in SATELLITES.values()])}")
     
     # Test API
     print(f"\n🔍 Testowanie API...")
@@ -1052,6 +1315,14 @@ if __name__ == "__main__":
         print(f"   • Miasto: Warszawa")
     else:
         print(f"❌ OpenWeather API: NIEDOSTĘPNE")
+    
+    # Test NASA APOD
+    apod = get_nasa_apod()
+    if apod:
+        print(f"✅ NASA APOD API: AKTYWNE")
+        print(f"   • Ostatnie zdjęcie: {apod['title'][:30]}...")
+    else:
+        print(f"⚠️ NASA APOD API: MOŻLIWE PROBLEMY")
     
     print("=" * 60)
     print("🚀 System uruchomiony pomyślnie!")
