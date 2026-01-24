@@ -131,7 +131,7 @@ def get_openweather_data(lat, lon):
         # Dodaj dodatkowe informacje z OpenWeather
         openweather_info = {
             "pressure": data.get("main", {}).get("pressure", 0),  # hPa
-            "feels_like": data.get("main", {}).get("feels_like", 0),  °C
+            "feels_like": data.get("main", {}).get("feels_like", 0),  # °C
             "weather_main": data.get("weather", [{}])[0].get("main", ""),
             "weather_description": data.get("weather", [{}])[0].get("description", ""),
             "weather_icon": data.get("weather", [{}])[0].get("icon", ""),
@@ -192,11 +192,11 @@ def get_weather_alerts(lat, lon):
                     "sender": alert.get("sender_name", "")
                 })
         
-        return alerts if alerts else None
+        return alerts if alerts else []
         
     except Exception as e:
         logger.error(f"❌ Błąd alertów OpenWeather: {e}")
-        return None
+        return []
 
 def calculate_moon_phase():
     """Oblicz fazę księżyca"""
@@ -454,7 +454,7 @@ def get_detailed_weather_report(city_key):
         },
         "forecast_available": forecast_data is not None,
         "alerts": alerts_data,
-        "alerts_count": len(alerts_data) if alerts_data else 0,
+        "alerts_count": len(alerts_data),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
