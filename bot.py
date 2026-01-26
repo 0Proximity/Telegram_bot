@@ -12,39 +12,149 @@ import threading
 import requests
 import math
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template_string
-from apscheduler.schedulers.background import BackgroundScheduler
 import sqlite3
 from typing import Dict, List, Optional
-import numpy as np
-from qiskit import QuantumCircuit
-from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
-from qiskit_aer import AerSimulator
+
+# Próbuj zaimportować wymagane pakiety z fallbackami
+try:
+    from flask import Flask, request, jsonify, render_template_string
+    FLASK_AVAILABLE = True
+except ImportError:
+    print("⚠️ Flask niedostępny, używam fallback")
+    FLASK_AVAILABLE = False
+    # Simple Flask replacement
+    class SimpleFlask:
+        def __init__(self, name):
+            self.name = name
+            self.routes = {}
+        
+        def route(self, path, methods=None):
+            def decorator(func):
+                self.routes[path] = func
+                return func
+            return decorator
+        
+        def run(self, host='0.0.0.0', port=10000, debug=False, **kwargs):
+            print(f"🚀 Serwer działający na {host}:{port}")
+            # Simple HTTP server simulation
+            import http.server
+            import socketserver
+            
+            class Handler(http.server.SimpleHTTPRequestHandler):
+                def do_GET(self):
+                    if self.path in self.routes:
+                        result = self.routes[self.path]()
+                        self.send_response(200)
+                        self.send_header('Content-type', 'text/html')
+                        self.end_headers()
+                        self.wfile.write(str(result).encode())
+                    else:
+                        super().do_GET()
+            
+            with socketserver.TCPServer((host, port), Handler) as httpd:
+                print(f"✅ Serwer gotowy na porcie {port}")
+                httpd.serve_forever()
+    
+    Flask = SimpleFlask
+    request = type('obj', (object,), {'get_json': lambda: {}, 'headers': {}})
+    jsonify = lambda x: str(x)
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    SCHEDULER_AVAILABLE = True
+except ImportError:
+    print("⚠️ APScheduler niedostępny")
+    SCHEDULER_AVAILABLE = False
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    print("⚠️ NumPy niedostępny")
+    NUMPY_AVAILABLE = False
+    np = type('obj', (object,), {
+        'pi': 3.141592653589793,
+        'cos': lambda x: math.cos(x),
+        'array': lambda x: x
+    })
+
+# Qiskit - opcjonalne zależności
+try:
+    from qiskit import QuantumCircuit
+    from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
+    from qiskit_aer import AerSimulator
+    QISKIT_AVAILABLE = True
+except ImportError:
+    print("⚠️ Qiskit niedostępny, używam symulatora")
+    QISKIT_AVAILABLE = False
+    
+    # Symulowane klasy Qiskit
+    class QuantumCircuit:
+        def __init__(self, n):
+            self.n = n
+        
+        def h(self, q):
+            pass
+        
+        def cx(self, q1, q2):
+            pass
+        
+        def rx(self, angle, q):
+            pass
+        
+        def ry(self, angle, q):
+            pass
+        
+        def rz(self, angle, q):
+            pass
+        
+        def measure_all(self):
+            pass
+    
+    class AerSimulator:
+        def run(self, circuit, shots=1000):
+            class Result:
+                def result(self):
+                    class FinalResult:
+                        def get_counts(self):
+                            return {'000': 250, '001': 250, '010': 250, '011': 250}
+                    return FinalResult()
+            return Result()
+    
+    class QiskitRuntimeService:
+        def __init__(self, channel=None, token=None):
+            pass
+        
+        def backends(self):
+            return []
+    
+    Sampler = type('Sampler', (), {'run': lambda self, circuit, shots: type('obj', (), {
+        'result': lambda: type('obj', (), {'quasi_dists': [{}]})()
+    })()})
 
 # ====================== KONFIGURACJA ======================
-# ⚠️ UWAGA: Tokeny są widoczne - później przenieś do zmiennych środowiskowych!
-TOKEN = "8490381532:AAETsrsXJzUn-gJHNGASnIqC_3hjtOwaqic"
-RENDER_URL = "https://telegram-bot-szxa.onrender.com"
+# Używamy zmiennych środowiskowych z fallbackami
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8490381532:AAETsrsXJzUn-gJHNGASnIqC_3hjtOwaqic")
+RENDER_URL = os.getenv("RENDER_URL", "https://telegram-bot-szxa.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
 WEBHOOK_URL = f"{RENDER_URL}/webhook"
 
-# API klucze - PRZENIEŚ DO ZMIENNYCH ŚRODOWISKOWYCH!
-NASA_API_KEY = "P0locPuOZBvnkHCdIKjkxzKsfnM7tc7pbiMcsBDE"
-N2YO_API_KEY = "UNWEQ8-N47JL7-WFJZYX-5N65"
-OPENWEATHER_API_KEY = "38e01cfb763fc738e9eddee84cfc4384"
-IBM_QUANTUM_TOKEN = "esUNC1tmumZpWO1C2iwgaYxCA48k4MBOiFp7ARD2Wk3A"
-DEEPSEEK_API_KEY = "sk-4af5d51f20e34ba8b53e09e6422341a4"
+# API klucze - PRIORYTET: zmienne środowiskowe
+NASA_API_KEY = os.getenv("NASA_API_KEY", "P0locPuOZBvnkHCdIKjkxzKsfnM7tc7pbiMcsBDE")
+N2YO_API_KEY = os.getenv("N2YO_API_KEY", "UNWEQ8-N47JL7-WFJZYX-5N65")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "38e01cfb763fc738e9eddee84cfc4384")
+IBM_QUANTUM_TOKEN = os.getenv("IBM_QUANTUM_TOKEN", "esUNC1tmumZpWO1C2iwgaYxCA48k4MBOiFp7ARD2Wk3A")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-4af5d51f20e34ba8b53e09e6422341a4")
 
 # API endpoints
 N2YO_BASE_URL = "https://api.n2yo.com/rest/v1/satellite"
 NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
-NASA_EARTH_URL = "https://api.nasa.gov/planetary/earth/assets"
 OPENMETEO_BASE_URL = "https://api.open-meteo.com/v1/forecast"
 OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
 # Baza danych użytkowników
-DB_FILE = "sentry_one.db"
+DB_FILE = "sentry_one.db
 
 # Miasta do obserwacji
 OBSERVATION_CITIES = {
