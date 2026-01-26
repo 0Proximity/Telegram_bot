@@ -1,24 +1,20 @@
-# Główne zależności
+# CORE DEPENDENCIES (must have)
 Flask==2.3.3
-Werkzeug==2.3.7
 requests==2.31.0
 python-telegram-bot==20.3
 
-# Qiskit i obliczenia kwantowe
+# DATA SCIENCE & AI
+numpy==1.24.0
+scipy==1.11.0
+pandas==2.0.3
+
+# QUANTUM COMPUTING
 qiskit==1.0.0
 qiskit-ibm-runtime==0.21.0
 qiskit-aer==0.12.0
 
-# AI i data science
-numpy==1.24.0
-pandas==2.0.3
-scipy==1.11.0
-
-# Planowanie zadań
+# SCHEDULING
 APScheduler==3.10.4
 
-# Baza danych
-sqlite3
-
-# Dodatkowe narzędzia
+# UTILITIES
 python-dotenv==1.0.0
