@@ -1,16 +1,11 @@
 services:
   - type: web
-    name: telegram-bot-szxa
+    name: sentry-one-bot
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
+    buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      pip install -r requirements.txt
+    startCommand: python app.py
     envVars:
-      - key: TELEGRAM_TOKEN
-        sync: false
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: telegram-bot-szxa
-          property: url
-    healthCheckPath: /health
-    autoDeploy: true
+      - key: PORT
+        value: 10000
