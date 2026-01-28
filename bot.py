@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 RENDER_URL = os.getenv("RENDER_URL", "https://telegram-bot-szxa.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
-WEBHOOK_URL = f"{RENDER_URL}/webhook"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", f"{RENDER_URL}/webhook")  # Używamy z env lub domyślnego
 
 # API klucze - UŻYJ SWOICH KLUCZY LUB ZMIENNYCH ŚRODOWISKOWYCH
 NASA_API_KEY = os.getenv("NASA_API_KEY")
@@ -100,8 +100,6 @@ SATELLITES = {
 print("=" * 70)
 print("🤖 SENTRY ONE v14.0 - TOAST EDITION")
 print("🍻 WYJDŹ Z PIWEM, TOAST DO SATELITY! 🛰️")
-print(f"🌐 URL: {RENDER_URL}")
-print(f"🗺️  Mapbox API: {'✅ Aktywny' if MAPBOX_API_KEY else '❌ Brak klucza'}")
 print("=" * 70)
 
 # ====================== LOGGING ======================
@@ -181,7 +179,7 @@ class MapboxProvider:
         """URL do nawigacji Mapbox"""
         if not self.available:
             return None
-        return f"https://api.mapbox.com/directions-v5/mapbox/walking/{start_lon},{start_lat};{end_lon},{end_lat}?access_token={self.api_key}&geometries=geojson"
+        return f"https://api.mapbox.com/directions/v5/mapbox/walking/{start_lon},{start_lat};{end_lon},{end_lat}?access_token={self.api_key}&geometries=geojson"
 
 # ====================== TOAST MODULE ======================
 class SatelliteToast:
