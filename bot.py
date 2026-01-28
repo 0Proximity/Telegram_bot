@@ -18,20 +18,20 @@ import sqlite3
 from typing import Dict, List, Optional
 
 # ====================== KONFIGURACJA ======================
-TOKEN = "8490381532:AAETsrsXJzUn-gJHNGASnIqC_3hjtOwaqic"
-RENDER_URL = "https://telegram-bot-szxa.onrender.com"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+RENDER_URL = os.getenv("RENDER_URL", "https://telegram-bot-szxa.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
 WEBHOOK_URL = f"{RENDER_URL}/webhook"
 
 # API klucze - UŻYJ SWOICH KLUCZY LUB ZMIENNYCH ŚRODOWISKOWYCH
-NASA_API_KEY = os.getenv("NASA_API_KEY", "P0locPuOZBvnkHCdIKjkxzKsfnM7tc7pbiMcsBDE")
-N2YO_API_KEY = os.getenv("N2YO_API_KEY", "UNWEQ8-N47JL7-WFJZYX-5N65")
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "38e01cfb763fc738e9eddee84cfc4384")
-IBM_QUANTUM_TOKEN = os.getenv("IBM_QUANTUM_TOKEN", "esUNC1tmumZpWO1C2iwgaYxCA48k4MBOiFp7ARD2Wk3A")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-4af5d51f20e34ba8b53e09e6422341a4")
+NASA_API_KEY = os.getenv("NASA_API_KEY")
+N2YO_API_KEY = os.getenv("N2YO_API_KEY")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+IBM_QUANTUM_TOKEN = os.getenv("IBM_QUANTUM_TOKEN")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 # MAPBOX API - TWÓJ TOKEN
-MAPBOX_API_KEY = os.getenv("MAPBOX_API_KEY", "pk.eyJ1IjoibWFsYWZheHVzIiwiYSI6ImNta3c5bHd2MTAwMzIzZXNmYmJmaDhpbG8ifQ.kU8ptwsaPVdxGrXa1qQt4Q")
+MAPBOX_API_KEY = os.getenv("MAPBOX_API_KEY")
 
 # API endpoints
 N2YO_BASE_URL = "https://api.n2yo.com/rest/v1/satellite"
@@ -181,7 +181,7 @@ class MapboxProvider:
         """URL do nawigacji Mapbox"""
         if not self.available:
             return None
-        return f"https://api.mapbox.com/directions/v5/mapbox/walking/{start_lon},{start_lat};{end_lon},{end_lat}?access_token={self.api_key}&geometries=geojson"
+        return f"https://api.mapbox.com/directions-v5/mapbox/walking/{start_lon},{start_lat};{end_lon},{end_lat}?access_token={self.api_key}&geometries=geojson"
 
 # ====================== TOAST MODULE ======================
 class SatelliteToast:
