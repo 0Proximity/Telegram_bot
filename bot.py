@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 # ====================== KONFIGURACJA ======================
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-RENDER_URL = os.getenv("RENDER_URL","f {RENDER_URL}")
+RENDER_URL = os.getenv("RENDER_URL","https://telegram-bot-szxa.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", f"{RENDER_URL}/webhook")  # Używamy z env lub domyślnego
 
