@@ -1,1330 +1,1773 @@
 #!/usr/bin/env python3
 """
-🤖 SENTRY ONE v14.0 - TOAST EDITION
-DeepSeek AI + IBM Quantum + NASA + Mapbox + SATELLITE TOAST!
+🛰️ EARTH OBSERVATION PLATFORM v6.0 - COMPLETE EDITION
+✅ Skyfield Orbital Tracking
+✅ USGS Real-Time Events
+✅ NASA Earth Data
+✅ Mapbox Visualization
+✅ DeepSeek AI Analysis
+✅ OpenWeather Conditions
+✅ Telegram Notifications
+✅ Render Cloud Ready
 """
 
 import os
 import json
 import time
-import logging
+import math
+import sqlite3
 import threading
 import requests
-import math
-import random
+import asyncio
+import aiohttp
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, render_template_string
-import sqlite3
-from typing import Dict, List, Optional
+from typing import Dict, List, Tuple, Optional, Any
+from dataclasses import dataclass
+from flask import Flask, request, jsonify
+from queue import Queue
+import logging
+
+# Import Skyfield
+from skyfield.api import load, EarthSatellite, Topos, utc
+import pytz
 
 # ====================== KONFIGURACJA ======================
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-RENDER_URL = os.getenv("RENDER_URL","https://telegram-bot-szxa.onrender.com")
+print("=" * 80)
+print("🚀 EARTH OBSERVATION PLATFORM v6.0")
+print("🌍 Kompletna integracja 6 API")
+print("=" * 80)
+
+# Tokeny API z środowiska
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+USGS_API_KEY  = od.getenv("USGS_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+MAPBOX_API_KEY = os.getenv("MAPBOX_API_KEY", "")
+N2YO_API_KEY = os.getenv("N2YO_API_KEY", "")
+NASA_API_KEY = os.getenv("NASA_API_KEY", "")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
+RENDER_URL = os.getenv("RENDER_URL", "https://telegram-bot-1-7l4g.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", f"{RENDER_URL}/webhook")  # Używamy z env lub domyślnego
 
-# API klucze - UŻYJ SWOICH KLUCZY LUB ZMIENNYCH ŚRODOWISKOWYCH
-NASA_API_KEY = os.getenv("NASA_API_KEY")
-N2YO_API_KEY = os.getenv("N2YO_API_KEY")
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-IBM_QUANTUM_TOKEN = os.getenv("IBM_QUANTUM_TOKEN")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-
-# MAPBOX API - TWÓJ TOKEN
-MAPBOX_API_KEY = os.getenv("MAPBOX_API_KEY")
-
-# API endpoints
-N2YO_BASE_URL = "https://api.n2yo.com/rest/v1/satellite"
-NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
-OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-MAPBOX_STATIC_URL = "https://api.mapbox.com/styles/v1/mapbox"
-
-# Baza danych użytkowników
-DB_FILE = "sentry_one.db"
-
-# Miasta do obserwacji z miejscami do toastu
-OBSERVATION_CITIES = {
-    "warszawa": {
-        "name": "Warszawa", 
-        "lat": 52.2297, 
-        "lon": 21.0122,
-        "timezone": "Europe/Warsaw",
-        "country": "Poland",
-        "emoji": "🏛️",
-        "toast_spots": [
-            {"name": "Park Skaryszewski", "lat": 52.2381, "lon": 21.0485, "desc": "Otwarta przestrzeń nad Jeziorem Kamionkowskim", "type": "park"},
-            {"name": "Dach Biblioteki UW", "lat": 52.2318, "lon": 21.0127, "desc": "Widok na całe miasto", "type": "viewpoint"},
-            {"name": "Kopiec Powstania Warszawskiego", "lat": 52.2044, "lon": 21.0532, "desc": "Najwyższy punkt w Warszawie", "type": "hill"},
-            {"name": "Bulwary Wiślane", "lat": 52.2400, "lon": 21.0300, "desc": "Otwarta przestrzeń nad Wisłą", "type": "river"},
-            {"name": "Łazienki Królewskie", "lat": 52.2155, "lon": 21.0355, "desc": "Park z otwartym niebem", "type": "park"}
-        ]
-    },
-    "koszalin": {
-        "name": "Koszalin", 
-        "lat": 54.1943, 
-        "lon": 16.1712,
-        "timezone": "Europe/Warsaw",
-        "country": "Poland",
-        "emoji": "🌲",
-        "toast_spots": [
-            {"name": "Wzgórze Chełmskie", "lat": 54.1955, "lon": 16.1839, "desc": "Najwyższy punkt z widokiem na miasto", "type": "hill"},
-            {"name": "Jezioro Jamno", "lat": 54.2300, "lon": 16.1500, "desc": "Otwarta przestrzeń nad jeziorem", "type": "lake"},
-            {"name": "Park nad Dzierżęcinką", "lat": 54.1900, "lon": 16.1700, "desc": "Cichy park w centrum miasta", "type": "park"},
-            {"name": "Wieża Katedralna", "lat": 54.1903, "lon": 16.1824, "desc": "Widok z wieży katedry", "type": "viewpoint"}
-        ]
-    },
-    "krakow": {
-        "name": "Kraków", 
-        "lat": 50.0647, 
-        "lon": 19.9450,
-        "timezone": "Europe/Warsaw",
-        "country": "Poland",
-        "emoji": "🐉",
-        "toast_spots": [
-            {"name": "Kopiec Kościuszki", "lat": 50.0550, "lon": 19.8936, "desc": "Panoramiczny widok na miasto", "type": "hill"},
-            {"name": "Błonia Krakowskie", "lat": 50.0589, "lon": 19.9022, "desc": "Ogromna otwarta przestrzeń", "type": "park"},
-            {"name": "Wawel", "lat": 50.0541, "lon": 19.9354, "desc": "Wzgórze wawelskie nad Wisłą", "type": "historic"}
-        ]
-    }
-}
-
-# Satelity do obserwacji
-SATELLITES = {
-    "iss": {"name": "Międzynarodowa Stacja Kosmiczna (ISS)", "id": 25544, "emoji": "🛰️", "type": "stacja"},
-    "hubble": {"name": "Teleskop Hubble'a", "id": 20580, "emoji": "🔭", "type": "teleskop"},
-    "terra": {"name": "Satelita Terra (NASA)", "id": 25994, "emoji": "🌍", "type": "obserwacja"},
-    "noaa20": {"name": "NOAA-20 (pogoda)", "id": 43013, "emoji": "🌤️", "type": "meteo"}
-}
-
-print("=" * 70)
-print("🤖 SENTRY ONE v14.0 - TOAST EDITION")
-print("🍻 WYJDŹ Z PIWEM, TOAST DO SATELITY! 🛰️")
-print("=" * 70)
+# Konfiguracja systemu
+WEBHOOK_URL = f"{RENDER_URL}/webhook"
+DB_FILE = "earth_observation_v6.db"
+CHECK_INTERVAL = 300  # 5 minut
 
 # ====================== LOGGING ======================
 logging.basicConfig(
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('earth_observation.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
-# ====================== MAPBOX MODULE ======================
-class MapboxProvider:
-    """Dostawca map i zdjęć satelitarnych Mapbox"""
+# ====================== DATA STRUCTURES ======================
+@dataclass
+class Satellite:
+    """Struktura danych satelity"""
+    norad_id: int
+    name: str
+    type: str
+    camera: str
+    swath_km: float
+    resolution_m: float
+    min_elevation: float
+    tle_line1: str = ""
+    tle_line2: str = ""
+    skyfield_sat: Any = None
+    last_update: datetime = None
+
+@dataclass
+class ObservationPoint:
+    """Punkt obserwacyjny"""
+    name: str
+    lat: float
+    lon: float
+    elevation: float = 0
+    skyfield_topos: Any = None
+
+@dataclass
+class Earthquake:
+    """Dane trzęsienia ziemi"""
+    id: str
+    place: str
+    magnitude: float
+    time: datetime
+    lat: float
+    lon: float
+    depth: float
+    url: str
+    significance: int
+
+# ====================== SKYFIELD INIT ======================
+try:
+    ts = load.timescale()
+    logger.info("✅ Skyfield timescale załadowany")
+except Exception as e:
+    logger.error(f"⚠️ Skyfield error: {e}")
+    ts = None
+
+# ====================== MODUŁ USGS ======================
+class USGSIntegration:
+    """Integracja z USGS API - trzęsienia ziemi, wulkany"""
+    
+    BASE_URL = "https://earthquake.usgs.gov/fdsnws/event/1"
+    EONET_URL = "https://eonet.gsfc.nasa.gov/api/v3/events"
+    
+    def get_recent_earthquakes(self, min_magnitude=4.0, hours=24, limit=20) -> List[Earthquake]:
+        """Pobierz ostatnie trzęsienia ziemi"""
+        try:
+            endtime = datetime.utcnow()
+            starttime = endtime - timedelta(hours=hours)
+            
+            params = {
+                "format": "geojson",
+                "starttime": starttime.strftime("%Y-%m-%dT%H:%M:%S"),
+                "endtime": endtime.strftime("%Y-%m-%dT%H:%M:%S"),
+                "minmagnitude": min_magnitude,
+                "orderby": "time",
+                "limit": limit
+            }
+            
+            response = requests.get(f"{self.BASE_URL}/query", params=params, timeout=10)
+            data = response.json()
+            
+            earthquakes = []
+            for feature in data.get('features', []):
+                props = feature['properties']
+                coords = feature['geometry']['coordinates']
+                
+                quake = Earthquake(
+                    id=feature['id'],
+                    place=props['place'],
+                    magnitude=props['mag'],
+                    time=datetime.fromtimestamp(props['time'] / 1000),
+                    lat=coords[1],
+                    lon=coords[0],
+                    depth=coords[2],
+                    url=props['url'],
+                    significance=props.get('sig', 0)
+                )
+                earthquakes.append(quake)
+            
+            logger.info(f"📊 Pobrano {len(earthquakes)} trzęsień ziemi")
+            return sorted(earthquakes, key=lambda x: x.magnitude, reverse=True)
+            
+        except Exception as e:
+            logger.error(f"❌ Błąd USGS: {e}")
+            return []
+    
+    def get_significant_earthquakes(self, min_magnitude=5.5) -> List[Earthquake]:
+        """Pobierz znaczące trzęsienia ziemi"""
+        try:
+            url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            earthquakes = []
+            for feature in data.get('features', []):
+                props = feature['properties']
+                if props['mag'] >= min_magnitude:
+                    coords = feature['geometry']['coordinates']
+                    
+                    quake = Earthquake(
+                        id=feature['id'],
+                        place=props['place'],
+                        magnitude=props['mag'],
+                        time=datetime.fromtimestamp(props['time'] / 1000),
+                        lat=coords[1],
+                        lon=coords[0],
+                        depth=coords[2],
+                        url=props['url'],
+                        significance=props.get('sig', 0)
+                    )
+                    earthquakes.append(quake)
+            
+            return earthquakes
+        except Exception as e:
+            logger.error(f"❌ Błąd significant earthquakes: {e}")
+            return []
+    
+    def get_natural_events(self) -> List[Dict]:
+        """Pobierz naturalne zdarzenia (EONET)"""
+        try:
+            params = {'status': 'open', 'limit': 50}
+            response = requests.get(self.EONET_URL, params=params, timeout=10)
+            data = response.json()
+            
+            events = []
+            for event in data.get('events', []):
+                event_data = {
+                    'id': event['id'],
+                    'title': event['title'],
+                    'description': event.get('description', ''),
+                    'categories': [cat['title'] for cat in event.get('categories', [])],
+                    'coordinates': None,
+                    'date': None
+                }
+                
+                if event.get('geometries'):
+                    geom = event['geometries'][0]
+                    if 'coordinates' in geom:
+                        event_data['coordinates'] = {
+                            'lon': geom['coordinates'][0],
+                            'lat': geom['coordinates'][1]
+                        }
+                        event_data['date'] = geom.get('date', '')
+                
+                events.append(event_data)
+            
+            logger.info(f"🌪️ Pobrano {len(events)} zdarzeń naturalnych")
+            return events
+        except Exception as e:
+            logger.error(f"❌ Błąd EONET: {e}")
+            return []
+    
+    def get_landsat_archive(self, lat: float, lon: float, 
+                           date: str = None) -> Optional[Dict]:
+        """Sprawdź dostępność zdjęć Landsat"""
+        try:
+            if date is None:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Landsat Look URL (przykładowy)
+            base_url = "https://landsatlook.usgs.gov/stac-server"
+            
+            # W praktyce potrzebne byłoby konto i autoryzacja
+            # Tutaj zwracamy mock danych
+            return {
+                'available': True,
+                'date': date,
+                'coordinates': {'lat': lat, 'lon': lon},
+                'satellites': ['Landsat 8', 'Landsat 9'],
+                'note': 'Wymaga konta USGS EarthExplorer'
+            }
+        except Exception as e:
+            logger.error(f"❌ Błąd Landsat: {e}")
+            return None
+
+# ====================== MODUŁ NASA ======================
+class NASAIntegration:
+    """Integracja z NASA API"""
     
     def __init__(self, api_key):
         self.api_key = api_key
-        self.available = bool(api_key and len(api_key) > 10)
     
-    def get_satellite_image(self, lat, lon, zoom=15, width=600, height=400):
-        """Pobierz zdjęcie satelitarne z Mapbox"""
-        if not self.available:
-            return self._get_fallback_image()
-        
+    def get_earth_imagery(self, lat: float, lon: float, date: str = None) -> Optional[Dict]:
+        """Pobierz zdjęcia Ziemi"""
         try:
-            # Styl satellite-v9 dla zdjęć satelitarnych
-            url = f"{MAPBOX_STATIC_URL}/satellite-v9/static/{lon},{lat},{zoom}/{width}x{height}"
-            url += f"?access_token={self.api_key}&attribution=false&logo=false"
+            if date is None:
+                date = datetime.now().strftime('%Y-%m-%d')
             
-            # Sprawdź czy URL jest dostępny
-            response = requests.head(url, timeout=5)
+            url = "https://api.nasa.gov/planetary/earth/imagery"
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'date': date,
+                'dim': 0.1,
+                'api_key': self.api_key
+            }
+            
+            response = requests.get(url, params=params, timeout=15)
+            
             if response.status_code == 200:
-                return url
+                return {
+                    'url': response.url,
+                    'date': date,
+                    'coordinates': {'lat': lat, 'lon': lon},
+                    'success': True
+                }
             else:
-                return self._get_fallback_image()
+                # Fallback: zdjęcie archiwalne
+                return {
+                    'url': f"https://api.nasa.gov/planetary/earth/assets?lon={lon}&lat={lat}&date={date}&dim=0.1&api_key={self.api_key}",
+                    'date': date,
+                    'coordinates': {'lat': lat, 'lon': lon},
+                    'success': False,
+                    'note': 'Brak aktualnego zdjęcia, spróbuj archiwalnego'
+                }
                 
         except Exception as e:
-            logger.error(f"Mapbox error: {e}")
-            return self._get_fallback_image()
-    
-    def get_street_map(self, lat, lon, zoom=15, width=600, height=400):
-        """Pobierz mapę uliczną"""
-        if not self.available:
+            logger.error(f"❌ Błąd NASA Earth: {e}")
             return None
-        
+    
+    def get_asteroids(self, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Pobierz przeloty asteroid"""
         try:
-            # Styl streets-v11 dla mapy ulic
-            url = f"{MAPBOX_STATIC_URL}/streets-v11/static/{lon},{lat},{zoom}/{width}x{height}"
-            url += f"?access_token={self.api_key}&attribution=false&logo=false"
-            return url
-        except:
-            return None
+            if start_date is None:
+                start_date = datetime.now().strftime('%Y-%m-%d')
+            if end_date is None:
+                end_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+            
+            url = "https://api.nasa.gov/neo/rest/v1/feed"
+            params = {
+                'start_date': start_date,
+                'end_date': end_date,
+                'api_key': self.api_key
+            }
+            
+            response = requests.get(url, params=params, timeout=15)
+            data = response.json()
+            
+            asteroids = []
+            for date in data.get('near_earth_objects', {}):
+                for asteroid in data['near_earth_objects'][date]:
+                    for approach in asteroid.get('close_approach_data', []):
+                        miss_km = float(approach['miss_distance']['kilometers'])
+                        if miss_km < 10000000:  # 10 mln km
+                            asteroids.append({
+                                'name': asteroid['name'],
+                                'diameter_min': asteroid['estimated_diameter']['kilometers']['estimated_diameter_min'],
+                                'diameter_max': asteroid['estimated_diameter']['kilometers']['estimated_diameter_max'],
+                                'hazardous': asteroid['is_potentially_hazardous_asteroid'],
+                                'miss_distance_km': miss_km,
+                                'velocity_kps': float(approach['relative_velocity']['kilometers_per_second']),
+                                'approach_time': approach['close_approach_date_full']
+                            })
+            
+            logger.info(f"🪐 Znaleziono {len(asteroids)} asteroid")
+            return sorted(asteroids, key=lambda x: x['miss_distance_km'])
+            
+        except Exception as e:
+            logger.error(f"❌ Błąd asteroid: {e}")
+            return []
     
-    def get_terrain_map(self, lat, lon, zoom=15, width=600, height=400):
-        """Pobierz mapę terenu"""
-        if not self.available:
-            return None
-        
+    def get_apod(self, date: str = None) -> Dict:
+        """Astronomy Picture of the Day"""
         try:
-            # Styl outdoors-v11 dla terenu
-            url = f"{MAPBOX_STATIC_URL}/outdoors-v11/static/{lon},{lat},{zoom}/{width}x{height}"
-            url += f"?access_token={self.api_key}&attribution=false&logo=false"
-            return url
-        except:
-            return None
-    
-    def _get_fallback_image(self):
-        """Fallback - zdjęcie kosmosu z Unsplash"""
-        space_images = [
-            "https://images.unsplash.com/photo-1446776653964-20c1d3a81b06?w=600&h=400&fit=crop",
-            "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=600&h=400&fit=crop",
-            "https://images.unsplash.com/photo-1502134249126-9f3755a50d78?w=600&h=400&fit=crop",
-            "https://images.unsplash.com/photo-1465101162946-4377e57745c3?w=600&h=400&fit=crop",
-            "https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?w=600&h=400&fit=crop",
-        ]
-        return random.choice(space_images)
-    
-    def get_directions_url(self, start_lat, start_lon, end_lat, end_lon):
-        """URL do nawigacji Mapbox"""
-        if not self.available:
-            return None
-        return f"https://api.mapbox.com/directions/v5/mapbox/walking/{start_lon},{start_lat};{end_lon},{end_lat}?access_token={self.api_key}&geometries=geojson"
+            url = "https://api.nasa.gov/planetary/apod"
+            params = {'api_key': self.api_key}
+            if date:
+                params['date'] = date
+            
+            response = requests.get(url, params=params, timeout=15)
+            return response.json()
+        except Exception as e:
+            logger.error(f"❌ Błąd APOD: {e}")
+            return {}
 
-# ====================== TOAST MODULE ======================
-class SatelliteToast:
-    """Moduł Toast do Satelity"""
+# ====================== MODUŁ MAPBOX ======================
+class MapboxVisualizer:
+    """Generowanie map i wizualizacji"""
     
-    def __init__(self, mapbox_provider):
-        self.api_key = N2YO_API_KEY
-        self.mapbox = mapbox_provider
-        
-    def get_next_satellite_pass(self, city_key, satellite_id=25544, days=1, min_visibility=30):
-        """Pobierz następny przelot satelity nad miastem"""
-        city = OBSERVATION_CITIES.get(city_key)
-        if not city:
-            return None
+    def __init__(self, api_key):
+        self.api_key = api_key
+    
+    def generate_satellite_map(self, center_lat: float, center_lon: float,
+                              markers: List[Dict] = None, zoom: int = 10) -> str:
+        """Wygeneruj mapę satelitarną"""
+        try:
+            style = "satellite-streets-v12"
+            size = "800x600"
+            
+            # Marker string
+            marker_str = ""
+            if markers:
+                for marker in markers:
+                    color = marker.get('color', 'ff0000')
+                    label = marker.get('label', 's')
+                    marker_str += f"pin-{label}+{color}({marker['lon']},{marker['lat']})/"
+            
+            map_url = (
+                f"https://api.mapbox.com/styles/v1/mapbox/{style}/static/"
+                f"{marker_str}"
+                f"{center_lon},{center_lat},{zoom}/{size}@2x"
+                f"?access_token={self.api_key}"
+            )
+            
+            return map_url
+        except Exception as e:
+            logger.error(f"❌ Błąd Mapbox: {e}")
+            return ""
+    
+    def generate_trajectory_map(self, trajectory: List[Tuple[float, float]],
+                               center_lat: float, center_lon: float) -> str:
+        """Wygeneruj mapę z trajektorią"""
+        try:
+            style = "satellite-streets-v12"
+            
+            # Konwertuj trajektorię do stringa
+            path_coords = ""
+            for lat, lon in trajectory:
+                path_coords += f"{lon},{lat};"
+            
+            map_url = (
+                f"https://api.mapbox.com/styles/v1/mapbox/{style}/static/"
+                f"path-5+f44-0.5({path_coords[:-1]})/"
+                f"{center_lon},{center_lat},9/800x600@2x"
+                f"?access_token={self.api_key}"
+            )
+            
+            return map_url
+        except Exception as e:
+            logger.error(f"❌ Błąd trajektorii: {e}")
+            return ""
+
+# ====================== MODUŁ DEEPSEEK AI ======================
+class DeepSeekAnalyzer:
+    """Analiza AI przez DeepSeek"""
+    
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "https://api.deepseek.com/v1"
+    
+    async def analyze_async(self, prompt: str, max_tokens: int = 1000) -> str:
+        """Asynchroniczna analiza AI"""
+        if not self.api_key:
+            return "❌ Brak klucza API DeepSeek"
         
         try:
-            url = f"{N2YO_BASE_URL}/visualpasses/{satellite_id}/{city['lat']}/{city['lon']}/0/{days}/{min_visibility}"
-            params = {"apiKey": self.api_key}
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "deepseek-chat",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Jesteś ekspertem od obserwacji satelitarnych, astronomii i geologii."
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.7
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                ) as response:
+                    result = await response.json()
+                    return result['choices'][0]['message']['content']
+                    
+        except Exception as e:
+            logger.error(f"❌ Błąd DeepSeek: {e}")
+            return f"❌ Błąd analizy AI: {str(e)}"
+    
+    async def analyze_observation(self, observation_data: Dict) -> str:
+        """Przeanalizuj okno obserwacyjne"""
+        prompt = f"""
+        Przeanalizuj okno obserwacyjne satelity:
+        
+        SATELITA: {observation_data.get('satellite_name', 'Nieznany')}
+        TYP: {observation_data.get('satellite_type', 'Nieznany')}
+        CZAS: {observation_data.get('time', 'Nieznany')}
+        ELEWACJA: {observation_data.get('elevation', 0)}°
+        PRAWDOPODOBIEŃSTWO: {observation_data.get('probability', 0)*100:.0f}%
+        
+        Warunki pogodowe: {observation_data.get('weather', 'Nieznane')}
+        
+        Oceń jakość okna (1-10) i daj praktyczne porady dla obserwatora.
+        """
+        
+        return await self.analyze_async(prompt)
+    
+    async def analyze_earthquake(self, earthquake_data: Dict) -> str:
+        """Przeanalizuj trzęsienie ziemi"""
+        prompt = f"""
+        Przeanalizuj trzęsienie ziemi:
+        
+        LOKALIZACJA: {earthquake_data.get('place', 'Nieznane')}
+        MAGNITUDA: {earthquake_data.get('magnitude', 0)}
+        GŁĘBOKOŚĆ: {earthquake_data.get('depth', 0)} km
+        CZAS: {earthquake_data.get('time', 'Nieznany')}
+        
+        Oceń znaczenie tego zdarzenia i potencjalne skutki.
+        Poradź jakie satelity mogą być przydatne do obserwacji.
+        """
+        
+        return await self.analyze_async(prompt)
+
+# ====================== MODUŁ POGODY ======================
+class WeatherIntegration:
+    """Integracja z OpenWeather"""
+    
+    def __init__(self, api_key):
+        self.api_key = api_key
+    
+    def get_current_weather(self, lat: float, lon: float) -> Dict:
+        """Pobierz aktualną pogodę"""
+        try:
+            url = "https://api.openweathermap.org/data/2.5/weather"
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'appid': self.api_key,
+                'units': 'metric',
+                'lang': 'pl'
+            }
             
             response = requests.get(url, params=params, timeout=10)
             data = response.json()
             
-            if data.get("info", {}).get("passescount", 0) > 0:
-                pass_data = data["passes"][0]
-                satellite = SATELLITES.get("iss", {})
-                
-                # Konwersja czasów
-                start_utc = pass_data["startUTC"]
-                max_utc = pass_data["maxUTC"]
-                end_utc = pass_data["endUTC"]
-                
-                # UTC+1 dla Polski (można dodać logikę czasu letniego)
-                start_local = datetime.fromtimestamp(start_utc) + timedelta(hours=1)
-                max_local = datetime.fromtimestamp(max_utc) + timedelta(hours=1)
-                end_local = datetime.fromtimestamp(end_utc) + timedelta(hours=1)
-                
-                return {
-                    "satellite": satellite.get("name", "ISS"),
-                    "satellite_emoji": satellite.get("emoji", "🛰️"),
-                    "start_time": start_local.strftime("%H:%M"),
-                    "max_time": max_local.strftime("%H:%M"),
-                    "end_time": end_local.strftime("%H:%M"),
-                    "date": start_local.strftime("%Y-%m-%d"),
-                    "duration": int((end_utc - start_utc) / 60),  # w minutach
-                    "max_elevation": round(pass_data["maxEl"], 1),
-                    "start_azimuth": round(pass_data["startAz"], 1),
-                    "start_compass": self.degrees_to_compass(pass_data["startAz"]),
-                    "max_compass": self.degrees_to_compass(pass_data["maxAz"]),
-                    "success": True
-                }
-            else:
-                # Symuluj przelot jeśli API nie odpowiada
-                return self._simulate_pass(city)
-                
+            return {
+                'temp': data['main']['temp'],
+                'feels_like': data['main']['feels_like'],
+                'humidity': data['main']['humidity'],
+                'pressure': data['main']['pressure'],
+                'description': data['weather'][0]['description'],
+                'clouds': data['clouds']['all'],
+                'visibility': data.get('visibility', 10000) / 1000,
+                'wind_speed': data['wind']['speed'],
+                'wind_deg': data['wind'].get('deg', 0),
+                'rain_1h': data.get('rain', {}).get('1h', 0),
+                'snow_1h': data.get('snow', {}).get('1h', 0),
+                'success': True
+            }
         except Exception as e:
-            logger.error(f"Satellite API error: {e}")
-            return self._simulate_pass(city)
+            logger.error(f"❌ Błąd pogody: {e}")
+            return {'success': False, 'error': str(e)}
     
-    def _simulate_pass(self, city):
-        """Symuluj przelot satelity (gdy API niedostępne)"""
-        now = datetime.now()
-        future = now + timedelta(hours=random.randint(1, 4))
+    def get_forecast(self, lat: float, lon: float, hours: int = 24) -> List[Dict]:
+        """Pobierz prognozę pogody"""
+        try:
+            url = "https://api.openweathermap.org/data/2.5/forecast"
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'appid': self.api_key,
+                'units': 'metric',
+                'lang': 'pl',
+                'cnt': hours // 3
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            data = response.json()
+            
+            forecast = []
+            for item in data['list']:
+                forecast.append({
+                    'time': datetime.fromtimestamp(item['dt']),
+                    'temp': item['main']['temp'],
+                    'temp_min': item['main']['temp_min'],
+                    'temp_max': item['main']['temp_max'],
+                    'humidity': item['main']['humidity'],
+                    'description': item['weather'][0]['description'],
+                    'clouds': item['clouds']['all'],
+                    'wind_speed': item['wind']['speed'],
+                    'precipitation': item.get('pop', 0)
+                })
+            
+            return forecast
+        except Exception as e:
+            logger.error(f"❌ Błąd prognozy: {e}")
+            return []
+    
+    def calculate_observation_score(self, weather: Dict) -> float:
+        """Oblicz ocenę warunków obserwacyjnych (0-10)"""
+        if not weather.get('success', False):
+            return 5.0  # Średnia jeśli brak danych
         
-        return {
-            "satellite": "Międzynarodowa Stacja Kosmiczna (ISS)",
-            "satellite_emoji": "🛰️",
-            "start_time": (future - timedelta(minutes=5)).strftime("%H:%M"),
-            "max_time": future.strftime("%H:%M"),
-            "end_time": (future + timedelta(minutes=5)).strftime("%H:%M"),
-            "date": future.strftime("%Y-%m-%d"),
-            "duration": 10,
-            "max_elevation": random.randint(30, 80),
-            "start_azimuth": random.randint(0, 360),
-            "start_compass": random.choice(["Północ", "Południe", "Wschód", "Zachód"]),
-            "max_compass": random.choice(["Północ", "Południe", "Wschód", "Zachód"]),
-            "success": True,
-            "simulated": True
-        }
+        score = 10.0
+        
+        # Zachmurzenie
+        if weather['clouds'] > 20:
+            score -= (weather['clouds'] - 20) * 0.1
+        
+        # Widoczność
+        if weather['visibility'] < 5:
+            score -= 2
+        
+        # Wilgotność
+        if weather['humidity'] > 80:
+            score -= (weather['humidity'] - 80) * 0.05
+        
+        # Opady
+        if weather.get('rain_1h', 0) > 0:
+            score -= 3
+        elif weather.get('snow_1h', 0) > 0:
+            score -= 1
+        
+        # Wiatr
+        if weather['wind_speed'] > 10:
+            score -= (weather['wind_speed'] - 10) * 0.1
+        
+        return max(0, min(10, round(score, 1)))
+
+# ====================== TLE MANAGER ======================
+class TLEManager:
+    """Menadżer danych orbitalnych"""
     
-    def degrees_to_compass(self, degrees):
+    def __init__(self):
+        self.satellites: Dict[int, Satellite] = {}
+        self.load_satellites()
+    
+    def load_satellites(self):
+        """Załaduj katalog satelitów"""
+        self.satellites = {
+            39084: Satellite(39084, "LANDSAT 8", "observation", "OLI/TIRS", 185, 15, 30),
+            40697: Satellite(40697, "SENTINEL-2A", "observation", "MSI", 290, 10, 30),
+            42969: Satellite(42969, "SENTINEL-2B", "observation", "MSI", 290, 10, 30),
+            25544: Satellite(25544, "ISS", "station", "EarthKAM", 10, 10, 20),
+            25994: Satellite(25994, "TERRA", "observation", "MODIS", 2330, 250, 25),
+            27424: Satellite(27424, "AQUA", "observation", "MODIS", 2330, 250, 25),
+            49260: Satellite(49260, "LANDSAT 9", "observation", "OLI-2/TIRS-2", 185, 15, 30),
+            43013: Satellite(43013, "NOAA-20", "weather", "VIIRS", 3000, 375, 20)
+        }
+        logger.info(f"📡 Załadowano {len(self.satellites)} satelitów")
+    
+    def fetch_tle(self, norad_id: int) -> Optional[Tuple[str, str]]:
+        """Pobierz aktualne TLE"""
+        try:
+            urls = [
+                f'https://celestrak.com/NORAD/elements/gp.php?CATNR={norad_id}&FORMAT=TLE',
+                f'https://tle.ivanstanojevic.me/api/tle/{norad_id}',
+                f'https://data.ivanstanojevic.me/api/tle/{norad_id}'
+            ]
+            
+            for url in urls:
+                try:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        if 'celestrak' in url:
+                            lines = response.text.strip().split('\n')
+                            if len(lines) >= 3:
+                                return lines[1], lines[2]
+                        else:
+                            data = response.json()
+                            if 'line1' in data and 'line2' in data:
+                                return data['line1'], data['line2']
+                except:
+                    continue
+            
+            return None
+        except Exception as e:
+            logger.error(f"❌ Błąd TLE {norad_id}: {e}")
+            return None
+    
+    def get_satellite(self, norad_id: int) -> Optional[Satellite]:
+        """Pobierz satelitę z TLE"""
+        sat = self.satellites.get(norad_id)
+        if not sat:
+            return None
+        
+        # Aktualizuj TLE jeśli stare
+        if sat.last_update is None or (datetime.utcnow() - sat.last_update).total_seconds() > 43200:
+            tle = self.fetch_tle(norad_id)
+            if tle:
+                sat.tle_line1, sat.tle_line2 = tle
+                try:
+                    sat.skyfield_sat = EarthSatellite(sat.tle_line1, sat.tle_line2, sat.name, ts)
+                    sat.last_update = datetime.utcnow()
+                    logger.info(f"✅ Zaktualizowano {sat.name}")
+                except Exception as e:
+                    logger.error(f"❌ Błąd Skyfield {norad_id}: {e}")
+        
+        return sat
+
+# ====================== PREDYKTOR PRZELOTÓW ======================
+class PassPredictor:
+    """Predykcja przelotów satelitów"""
+    
+    def __init__(self, tle_manager: TLEManager):
+        self.tle_manager = tle_manager
+        self.EARTH_RADIUS_KM = 6371
+    
+    def predict_passes(self, norad_id: int, point: ObservationPoint,
+                      days_ahead: int = 7, min_elevation: float = 10) -> List[Dict]:
+        """Przewiduj przeloty satelity"""
+        satellite = self.tle_manager.get_satellite(norad_id)
+        if not satellite or not satellite.skyfield_sat:
+            return []
+        
+        passes = []
+        observer = point.skyfield_topos
+        
+        # Oblicz przeloty
+        try:
+            difference = satellite.skyfield_sat - observer
+            t0 = ts.now()
+            t1 = ts.from_datetime((datetime.utcnow() + timedelta(days=days_ahead)).replace(tzinfo=utc))
+            
+            # Znajdź zdarzenia (rise/set)
+            t, events = satellite.skyfield_sat.find_events(observer, t0, t1, altitude_degrees=min_elevation)
+            
+            for i, (ti, event) in enumerate(zip(t, events)):
+                if event == 0:  # Rise
+                    rise_time = ti.utc_datetime()
+                    
+                    # Znajdź odpowiadający set
+                    for j in range(i + 1, len(events)):
+                        if events[j] == 2:  # Set
+                            set_time = t[j].utc_datetime()
+                            
+                            # Oblicz maksymalną elewację
+                            max_elevation = 0
+                            max_time = rise_time
+                            max_azimuth = 0
+                            
+                            # Próbkuj trajektorię
+                            dt = (set_time - rise_time).total_seconds()
+                            steps = min(10, max(3, int(dt / 60)))
+                            
+                            for k in range(steps + 1):
+                                sample_time = rise_time + timedelta(seconds=dt * k / steps)
+                                t_sample = ts.from_datetime(sample_time.replace(tzinfo=utc))
+                                topocentric = difference.at(t_sample)
+                                alt, az, _ = topocentric.altaz()
+                                
+                                if alt.degrees > max_elevation:
+                                    max_elevation = alt.degrees
+                                    max_time = sample_time
+                                    max_azimuth = az.degrees
+                            
+                            if max_elevation >= min_elevation:
+                                passes.append({
+                                    'satellite': satellite,
+                                    'point': point,
+                                    'rise_time': rise_time,
+                                    'set_time': set_time,
+                                    'max_time': max_time,
+                                    'max_elevation': max_elevation,
+                                    'max_azimuth': max_azimuth,
+                                    'duration_min': dt / 60,
+                                    'probability': self.calculate_probability(satellite, max_elevation)
+                                })
+                            break
+        except Exception as e:
+            logger.error(f"❌ Błąd predykcji {norad_id}: {e}")
+        
+        return passes
+    
+    def calculate_probability(self, satellite: Satellite, elevation: float) -> float:
+        """Oblicz prawdopodobieństwo obserwacji"""
+        base_prob = min(elevation / 90.0, 1.0)
+        
+        if satellite.type == "observation":
+            base_prob *= 0.9
+        elif satellite.type == "station":
+            base_prob *= 0.7
+        
+        return round(base_prob, 2)
+
+# ====================== TELEGRAM NOTIFIER ======================
+class TelegramNotifier:
+    """System powiadomień Telegram"""
+    
+    def __init__(self, token: str):
+        self.token = token
+    
+    def send_message(self, chat_id: int, text: str, parse_html: bool = True):
+        """Wyślij wiadomość"""
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML" if parse_html else None,
+            "disable_web_page_preview": True
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"❌ Błąd wysyłania: {e}")
+            return False
+    
+    def send_location(self, chat_id: int, lat: float, lon: float):
+        """Wyślij lokalizację"""
+        url = f"https://api.telegram.org/bot{self.token}/sendLocation"
+        payload = {
+            "chat_id": chat_id,
+            "latitude": lat,
+            "longitude": lon
+        }
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except:
+            pass
+    
+    def send_photo(self, chat_id: int, photo_url: str, caption: str = ""):
+        """Wyślij zdjęcie"""
+        url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
+        payload = {
+            "chat_id": chat_id,
+            "photo": photo_url,
+            "caption": caption[:1024]
+        }
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except Exception as e:
+            logger.error(f"❌ Błąd zdjęcia: {e}")
+
+# ====================== GŁÓWNY SYSTEM ======================
+class EarthObservationSystem:
+    """Główny system obserwacji Ziemi"""
+    
+    def __init__(self):
+        # Inicjalizacja wszystkich modułów
+        self.tle_manager = TLEManager()
+        self.predictor = PassPredictor(self.tle_manager)
+        self.notifier = TelegramNotifier(TOKEN)
+        
+        # API integracje
+        self.usgs = USGSIntegration()
+        self.nasa = NASAIntegration(NASA_API_KEY)
+        self.mapbox = MapboxVisualizer(MAPBOX_API_KEY) if MAPBOX_API_KEY else None
+        self.deepseek = DeepSeekAnalyzer(DEEPSEEK_API_KEY) if DEEPSEEK_API_KEY else None
+        self.weather = WeatherIntegration(OPENWEATHER_API_KEY) if OPENWEATHER_API_KEY else None
+        
+        # Punkty obserwacyjne
+        self.observation_points = self.load_points()
+        
+        # Baza danych
+        self.init_database()
+        
+        # Monitoring w tle
+        self.monitoring_active = True
+        threading.Thread(target=self.monitoring_loop, daemon=True).start()
+        
+        logger.info("✅ System obserwacji Ziemi gotowy!")
+    
+    def load_points(self) -> Dict[str, ObservationPoint]:
+        """Załaduj punkty obserwacyjne"""
+        points_data = {
+            "warszawa_centrum": ("Warszawa Centrum", 52.2297, 21.0122, 100),
+            "warszawa_park": ("Park Skaryszewski", 52.2381, 21.0485, 90),
+            "warszawa_lazienki": ("Łazienki Królewskie", 52.2155, 21.0355, 95),
+            "koszalin": ("Koszalin Wzgórze", 54.1955, 16.1839, 150),
+            "krakow": ("Kraków Kopiec", 50.0550, 19.8936, 280),
+            "gdansk": ("Gdańsk", 54.3722, 18.6383, 10),
+            "wroclaw": ("Wrocław", 51.1079, 17.0385, 120),
+            "poznan": ("Poznań", 52.4064, 16.9252, 80)
+        }
+        
+        points = {}
+        for name, (full_name, lat, lon, elev) in points_data.items():
+            topos = Topos(latitude_degrees=lat, longitude_degrees=lon, elevation_m=elev)
+            points[name] = ObservationPoint(full_name, lat, lon, elev, topos)
+        
+        return points
+    
+    def init_database(self):
+        """Inicjalizuj bazę danych"""
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            # Tabela obserwacji
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER,
+                    satellite_id INTEGER,
+                    satellite_name TEXT,
+                    point_name TEXT,
+                    observation_time TEXT,
+                    max_elevation REAL,
+                    probability REAL,
+                    azimuth REAL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Tabela trzęsień ziemi
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS earthquakes (
+                    id TEXT PRIMARY KEY,
+                    place TEXT,
+                    magnitude REAL,
+                    time TEXT,
+                    lat REAL,
+                    lon REAL,
+                    depth REAL,
+                    url TEXT,
+                    significance INTEGER,
+                    notified BOOLEAN DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            conn.commit()
+            conn.close()
+            logger.info("✅ Baza danych zainicjalizowana")
+        except Exception as e:
+            logger.error(f"❌ Błąd bazy danych: {e}")
+    
+    def monitoring_loop(self):
+        """Pętla monitorująca w tle"""
+        logger.info("🔄 Uruchomiono monitoring w tle")
+        
+        while self.monitoring_active:
+            try:
+                # Sprawdź trzęsienia ziemi co 5 minut
+                self.check_earthquakes()
+                
+                # Sprawdź zaplanowane obserwacje
+                self.check_scheduled_observations()
+                
+                time.sleep(CHECK_INTERVAL)
+                
+            except Exception as e:
+                logger.error(f"❌ Błąd monitoringu: {e}")
+                time.sleep(60)
+    
+    def check_earthquakes(self):
+        """Sprawdź nowe trzęsienia ziemi"""
+        try:
+            earthquakes = self.usgs.get_significant_earthquakes(min_magnitude=5.0)
+            
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            for quake in earthquakes:
+                # Sprawdź czy już mamy w bazie
+                cursor.execute("SELECT id FROM earthquakes WHERE id = ?", (quake.id,))
+                if not cursor.fetchone():
+                    # Zapisz nowe trzęsienie
+                    cursor.execute('''
+                        INSERT INTO earthquakes 
+                        (id, place, magnitude, time, lat, lon, depth, url, significance)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        quake.id, quake.place, quake.magnitude,
+                        quake.time.isoformat(), quake.lat, quake.lon,
+                        quake.depth, quake.url, quake.significance
+                    ))
+                    
+                    # Wyślij alert do zapisanych użytkowników
+                    self.send_earthquake_alert(quake)
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            logger.error(f"❌ Błąd sprawdzania trzęsień: {e}")
+    
+    def send_earthquake_alert(self, quake: Earthquake):
+        """Wyślij alert o trzęsieniu ziemi"""
+        alert_chats = [123456789]  # Tutaj dodaj chat_id
+        
+        for chat_id in alert_chats:
+            message = f"""
+🚨 <b>TRZĘSIENIE ZIEMI!</b>
+
+📍 <b>{quake.place}</b>
+⚡ <b>Magnituda: {quake.magnitude}</b>
+⏰ {quake.time.strftime('%Y-%m-%d %H:%M:%S UTC')}
+📍 {quake.lat:.3f}, {quake.lon:.3f}
+📉 Głębokość: {quake.depth:.1f} km
+
+🛰️ <b>SATELLITY NAD EPICENTRUM:</b>
+"""
+            
+            # Znajdź satelity które przelatują nad epicentrum
+            temp_point = ObservationPoint(
+                f"Epicentrum: {quake.place}",
+                quake.lat,
+                quake.lon,
+                0,
+                Topos(latitude_degrees=quake.lat, longitude_degrees=quake.lon)
+            )
+            
+            observation_sats = [s for s in self.tle_manager.satellites.values() 
+                              if s.type in ["observation", "station"]]
+            
+            found = False
+            for sat in observation_sats[:3]:
+                passes = self.predictor.predict_passes(
+                    sat.norad_id, temp_point, days_ahead=2
+                )
+                
+                if passes:
+                    best = max(passes, key=lambda x: x['probability'])
+                    message += f"\n• {sat.name}: {best['max_time'].strftime('%d.%m %H:%M')} (🎯 {best['probability']*100:.0f}%)"
+                    found = True
+            
+            if not found:
+                message += "\n• Brak obserwacji w ciągu 2 dni"
+            
+            message += f"\n\n🔗 <a href='{quake.url}'>Szczegóły trzęsienia</a>"
+            
+            self.notifier.send_message(chat_id, message)
+            
+            # Wyślij lokalizację epicentrum
+            self.notifier.send_location(chat_id, quake.lat, quake.lon)
+    
+    def check_scheduled_observations(self):
+        """Sprawdź zaplanowane obserwacje"""
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            # Znajdź obserwacje w ciągu najbliższych 24h
+            now = datetime.utcnow()
+            next_24h = now + timedelta(hours=24)
+            
+            cursor.execute('''
+                SELECT * FROM observations 
+                WHERE observation_time BETWEEN ? AND ?
+                ORDER BY observation_time
+            ''', (now.isoformat(), next_24h.isoformat()))
+            
+            observations = cursor.fetchall()
+            
+            for obs in observations:
+                obs_time = datetime.fromisoformat(obs[6])  # observation_time
+                
+                # Powiadomienia: 24h, 1h, 10min przed
+                notification_times = [
+                    (24, "24 godzin"),
+                    (1, "1 godzinę"),
+                    (0.167, "10 minut")
+                ]
+                
+                for hours_before, text in notification_times:
+                    notification_time = obs_time - timedelta(hours=hours_before)
+                    
+                    if now <= notification_time <= now + timedelta(minutes=5):
+                        self.send_observation_notification(obs, hours_before)
+            
+            conn.close()
+        except Exception as e:
+            logger.error(f"❌ Błąd sprawdzania obserwacji: {e}")
+    
+    def send_observation_notification(self, observation_data, hours_before: int):
+        """Wyślij powiadomienie o obserwacji"""
+        chat_id = observation_data[1]  # chat_id
+        satellite_id = observation_data[2]
+        point_name = observation_data[4]
+        obs_time = datetime.fromisoformat(observation_data[6])
+        
+        satellite = self.tle_manager.get_satellite(satellite_id)
+        point = self.observation_points.get(point_name)
+        
+        if not satellite or not point:
+            return
+        
+        # Znajdź aktualne dane przelotu
+        passes = self.predictor.predict_passes(satellite_id, point, days_ahead=1)
+        current_pass = None
+        
+        for p in passes:
+            if abs((p['max_time'] - obs_time).total_seconds()) < 3600:
+                current_pass = p
+                break
+        
+        if not current_pass:
+            return
+        
+        # Pobierz pogodę jeśli API dostępne
+        weather_info = ""
+        weather_score = 0
+        
+        if self.weather:
+            weather = self.weather.get_current_weather(point.lat, point.lon)
+            if weather.get('success', False):
+                weather_score = self.weather.calculate_observation_score(weather)
+                weather_info = f"""
+🌤️ <b>Pogoda:</b> {weather['description']}
+🌡️ {weather['temp']:.1f}°C | 💧 {weather['humidity']}%
+☁️ {weather['clouds']}% chmur | 💨 {weather['wind_speed']} m/s
+📊 <b>Ocena warunków:</b> {weather_score:.1f}/10
+"""
+        
+        # Wygeneruj mapę jeśli API dostępne
+        map_url = ""
+        if self.mapbox:
+            markers = [
+                {'lat': point.lat, 'lon': point.lon, 'color': 'ff0000', 'label': 's'}
+            ]
+            map_url = self.mapbox.generate_satellite_map(point.lat, point.lon, markers)
+        
+        if hours_before == 24:
+            message = f"""
+🛰️ <b>PRZYPOMNIENIE OBSERWACYJNE - ZA 24h</b>
+
+📡 <b>{satellite.name}</b> nad <b>{point.name}</b>
+⏰ <b>{obs_time.strftime('%Y-%m-%d %H:%M:%S')}</b>
+📈 Elewacja: {current_pass['max_elevation']:.1f}°
+🧭 Azymut: {current_pass['max_azimuth']:.1f}° ({self.degrees_to_compass(current_pass['max_azimuth'])})
+⏱️ Czas obserwacji: {current_pass['duration_min']:.0f} minut
+🎯 Prawdopodobieństwo: {current_pass['probability']*100:.0f}%
+
+{weather_info}
+"""
+            if map_url:
+                message += f"\n🗺️ <a href='{map_url}'>Zobacz mapę lokalizacji</a>"
+                
+        elif hours_before == 1:
+            message = f"""
+🚀 <b>OBSERWACJA ZA 1 GODZINĘ!</b>
+
+🛰️ <b>{satellite.name}</b> nad {point.name}
+⏰ <b>{obs_time.strftime('%H:%M:%S')}</b>
+
+🧭 <b>KIERUNEK:</b> {self.degrees_to_compass(current_pass['max_azimuth'])}
+📐 <b>WYSOKOŚĆ:</b> {current_pass['max_elevation']:.1f}° nad horyzontem
+⏱️ <b>TRWANIE:</b> {current_pass['duration_min']:.0f} minut
+
+{weather_info if weather_score >= 5 else "⚠️ <b>Uwaga: Złe warunki pogodowe!</b>"}
+
+🎯 <b>INSTRUKCJA:</b>
+1. Bądź na miejscu 10 minut przed
+2. Ustaw się twarzą w kierunku {self.degrees_to_compass(current_pass['max_azimuth'])}
+3. Patrz pod kątem {current_pass['max_elevation']:.1f}° nad horyzontem
+4. Satelita będzie widoczny przez {current_pass['duration_min']:.0f} minut
+"""
+            if map_url:
+                self.notifier.send_photo(chat_id, map_url, f"Mapa obserwacji: {satellite.name}")
+                
+        else:  # 10 minut
+            message = f"""
+⏰ <b>OBSERWACJA ZA 10 MINUT!</b>
+
+🛰️ <b>{satellite.name}</b> NADLATUJE!
+
+🎯 <b>KIERUNEK:</b> {self.degrees_to_compass(current_pass['max_azimuth'])}
+📐 <b>WYSOKOŚĆ:</b> {current_pass['max_elevation']:.1f}°
+⏱️ <b>CZAS OBSERWACJI:</b> {current_pass['duration_min']:.0f} minut
+
+🚀 <b>NA MIEJSCE! PATRZ W NIEBO!</b>
+"""
+        
+        self.notifier.send_message(chat_id, message)
+        
+        if hours_before <= 1:
+            self.notifier.send_location(chat_id, point.lat, point.lon)
+    
+    def degrees_to_compass(self, degrees: float) -> str:
         """Konwertuj stopnie na kierunek kompasu"""
-        directions = [
-            "Północ", "Północny-Wschód", "Wschód", "Południowy-Wschód",
-            "Południe", "Południowy-Zachód", "Zachód", "Północny-Zachód"
-        ]
+        directions = ["Północ", "Północny-Wschód", "Wschód", "Południowy-Wschód",
+                     "Południe", "Południowy-Zachód", "Zachód", "Północny-Zachód"]
         index = round(degrees / 45) % 8
         return directions[index]
     
-    def generate_toast_spot(self, city_key, spot_type=None):
-        """Wygeneruj miejsce do toastu"""
-        city = OBSERVATION_CITIES.get(city_key)
-        if not city or not city.get("toast_spots"):
-            # Fallback na losowe współrzędne
-            lat = city["lat"] + random.uniform(-0.02, 0.02)
-            lon = city["lon"] + random.uniform(-0.02, 0.02)
-            return {
-                "name": "Sekretne miejsce obserwacyjne",
-                "lat": lat,
-                "lon": lon,
-                "desc": "Wyjątkowe miejsce wybrane przez system",
-                "type": "secret",
-                "emoji": "🗺️"
-            }
+    def schedule_observation(self, chat_id: int, point_name: str, 
+                           satellite_id: int) -> Optional[Dict]:
+        """Zaplanuj obserwację"""
+        point = self.observation_points.get(point_name)
+        if not point:
+            return None
         
-        # Filtruj po typie jeśli podany
-        if spot_type:
-            filtered_spots = [s for s in city["toast_spots"] if s.get("type") == spot_type]
-            spots = filtered_spots if filtered_spots else city["toast_spots"]
-        else:
-            spots = city["toast_spots"]
+        passes = self.predictor.predict_passes(satellite_id, point, days_ahead=7)
         
-        spot = random.choice(spots)
+        if not passes:
+            return None
         
-        # Dodaj emoji wg typu
-        type_emojis = {
-            "park": "🌳", "viewpoint": "👁️", "hill": "⛰️", 
-            "river": "🌊", "lake": "💧", "historic": "🏰"
-        }
-        spot["emoji"] = type_emojis.get(spot.get("type", ""), "📍")
+        # Wybierz najlepszy przelot (najwyższa elewacja)
+        best_pass = max(passes, key=lambda x: x['max_elevation'])
         
-        return spot
-    
-    def get_toast_instructions(self, city_key, satellite_pass, spot, weather=None):
-        """Wygeneruj instrukcje toastu"""
-        city = OBSERVATION_CITIES[city_key]
-        
-        # Wybierz satelitę
-        satellite = next((s for s in SATELLITES.values() if s["name"] == satellite_pass["satellite"]), SATELLITES["iss"])
-        
-        instructions = f"""
-{satellite['emoji']} <b>PLAN TOASTU DO SATELITY!</b>
-
-📍 <b>MIASTO:</b> {city['name']} {city['emoji']}
-
-🛰️ <b>SATELITA:</b> {satellite_pass['satellite']}
-📅 <b>DATA:</b> {satellite_pass['date']}
-⏰ <b>GODZINY:</b> {satellite_pass['start_time']} - {satellite_pass['end_time']}
-🎯 <b>NAJLEPSZY MOMENT:</b> {satellite_pass['max_time']}
-🧭 <b>KIERUNEK:</b> {satellite_pass['start_compass']} → {satellite_pass['max_compass']}
-📐 <b>WYSOKOŚĆ:</b> {satellite_pass['max_elevation']}°
-⏱️ <b>CZAS TRWANIA:</b> {satellite_pass['duration']} minut
-
-{spot['emoji']} <b>MIEJSCE SPOTKANIA:</b>
-<b>{spot['name']}</b>
-{spot['desc']}
-
-📱 <b>INSTRUKCJA KROK PO KROKU:</b>
-1. 🍺 Zaopatrz się w ulubione piwo
-2. 🚶‍♂️ Udaj się na wskazane miejsce przed {satellite_pass['start_time']}
-3. 🧭 Ustaw się twarzą w kierunku {satellite_pass['start_compass']}
-4. ⏰ O {satellite_pass['max_time']} wznieś toast do nieba
-5. 📸 Satelita zrobi Ci zdjęcie z orbity!
-6. 🤳 Zrób selfie z toastem i oznacz #SatelliteToast
-
-🌌 <b>WSKAZÓWKI:</b>
-• Spójrz pod kątem {satellite_pass['max_elevation']}° nad horyzont
-• Satelita będzie wyglądać jak szybko poruszająca się gwiazda
-• Nie używaj latarki - pozwól oczom przyzwyczaić się do ciemności
-        """
-        
-        # Dodaj informacje pogodowe jeśli dostępne
-        if weather:
-            instructions += f"\n🌤️ <b>PROGNOZA NA {satellite_pass['max_time']}:</b>"
-            instructions += f"\n• Temperatura: {weather['temp']}°C"
-            instructions += f"\n• Zachmurzenie: {weather['clouds']}%"
-            instructions += f"\n• Wiatr: {weather['wind_speed']} m/s"
-            
-            if weather['clouds'] > 70:
-                instructions += "\n⚠️ <i>Wysokie zachmurzenie - satelita może być niewidoczna</i>"
-            elif weather['clouds'] < 30:
-                instructions += "\n✅ <i>Doskonałe warunki do obserwacji!</i>"
-        
-        # Dodaj informację jeśli to symulacja
-        if satellite_pass.get("simulated"):
-            instructions += "\n\n⚠️ <i>Uwaga: Używamy symulowanych danych satelitarnych</i>"
-        
-        return instructions
-    
-    def get_toast_quote(self):
-        """Losowy cytat na toast"""
-        quotes = [
-            "Do gwiazd i dalej! Za eksplorację kosmosu! 🚀",
-            "Piwem w satelitę! Niech grawitacja zawsze będzie z Tobą! 🍻🛰️",
-            "Za tych, co patrzą w gwiazdy i marzą o nieosiągalnym! ✨",
-            "Toast za niewidzialne wiązania między nami a kosmosem! 🔭",
-            "Niech Twoje marzenia będą tak wielkie jak wszechświat! 💫",
-            "Za noc pełną cudów i gwiazd spadających! 🌠",
-            "Wypijmy za tych, którzy odważyli się spojrzeć w niebo! 👨‍🚀",
-            "Za kosmiczną przygodę bez wychodzenia z domu! 🏠🚀"
-        ]
-        return random.choice(quotes)
-    
-    def generate_satellite_photo_caption(self, spot, satellite_pass):
-        """Wygeneruj podpis do zdjęcia satelitarnego"""
-        return f"""
-🛰️ <b>ZDJĘCIE SATELITARNE Z TOASTU!</b>
-
-{satellite_pass['satellite_emoji']} <b>Satelita:</b> {satellite_pass['satellite']}
-📍 <b>Lokalizacja:</b> {spot['name']}
-🕐 <b>Czas:</b> {satellite_pass['max_time']}
-📅 <b>Data:</b> {satellite_pass['date']}
-
-🍻 <b>TOAST ODEBRANY NA ORBICIE!</b>
-Satelita zarejestrowała Twój kosmiczny gest.
-Dziękujemy za udział w eksperymencie #SatelliteToast!
-
-💫 Następny toast już wkrótce!
-        """
-
-# ====================== DEEPSEEK AI ANALYZER ======================
-class DeepSeekAI:
-    """Analiza przez DeepSeek AI"""
-    
-    def __init__(self):
-        self.api_key = DEEPSEEK_API_KEY
-        self.available = self._check_api()
-    
-    def _check_api(self):
-        """Sprawdź dostępność API"""
+        # Zapisz w bazie
         try:
-            response = requests.get(
-                "https://api.deepseek.com/v1/models",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=5
-            )
-            return response.status_code == 200
-        except:
-            return False
-    
-    def analyze_toast_conditions(self, city_name, weather_data, satellite_pass):
-        """Analizuj warunki toastu przez AI"""
-        try:
-            prompt = f"""
-            Jesteś kosmicznym sommelierem. Oceniasz warunki do "toastu do satelity".
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
             
-            MIASTO: {city_name}
-            DATA: {datetime.now().strftime('%Y-%m-%d')}
-            GODZINA: {satellite_pass.get('max_time', '21:00')}
-            SATELITA: {satellite_pass.get('satellite', 'ISS')}
+            cursor.execute('''
+                INSERT INTO observations 
+                (chat_id, satellite_id, satellite_name, point_name, 
+                 observation_time, max_elevation, probability, azimuth)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                chat_id,
+                satellite_id,
+                best_pass['satellite'].name,
+                point_name,
+                best_pass['max_time'].isoformat(),
+                best_pass['max_elevation'],
+                best_pass['probability'],
+                best_pass['max_azimuth']
+            ))
             
-            DANE POGODOWE:
-            - Temperatura: {weather_data.get('temp', 0)}°C
-            - Zachmurzenie: {weather_data.get('clouds', 0)}%
-            - Wiatr: {weather_data.get('wind_speed', 0)} m/s
-            - Wilgotność: {weather_data.get('humidity', 0)}%
+            conn.commit()
+            conn.close()
             
-            Oceń toast w skali 1-10 i podaj:
-            1. Idealny rodzaj piwa dla tych warunków
-            2. Styl toastu (np. "dostojny", "entuzjastyczny")
-            3. Krótką wiadomość do satelity (max 10 słów)
+            logger.info(f"✅ Zaplanowano obserwację dla chat_id {chat_id}")
             
-            Odpowiedz WYŁĄCZNIE w formacie:
-            OCENA: X/10 | PIWO: [rodzaj] | STYL: [styl] | WIADOMOŚĆ: [tekst]
-            """
+            # Wyślij potwierdzenie
+            confirmation = f"""
+✅ <b>OBSERWACJA ZAPLANOWANA!</b>
+
+🛰️ {best_pass['satellite'].name}
+📍 {point.name}
+⏰ {best_pass['max_time'].strftime('%Y-%m-%d %H:%M:%S')}
+📈 {best_pass['max_elevation']:.1f}° | 🎯 {best_pass['probability']*100:.0f}%
+
+🔔 <b>Otrzymasz powiadomienia:</b>
+• 24 godzin przed
+• 1 godzinę przed
+• 10 minut przed
+"""
+            self.notifier.send_message(chat_id, confirmation)
             
-            response = requests.post(
-                DEEPSEEK_API_URL,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "deepseek-chat",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 150,
-                    "temperature": 0.7
-                },
-                timeout=10
-            )
+            return best_pass
             
-            if response.status_code == 200:
-                result = response.json()
-                ai_text = result["choices"][0]["message"]["content"]
-                
-                # Parsuj odpowiedź AI
-                analysis = {
-                    "score": 7,
-                    "beer": "Lager",
-                    "style": "Entuzjastyczny",
-                    "message": "Za eksplorację kosmosu!",
-                    "full_response": ai_text,
-                    "source": "DeepSeek AI"
-                }
-                
-                # Parsowanie odpowiedzi
-                if "OCENA:" in ai_text:
-                    try:
-                        score_part = ai_text.split("OCENA:")[1].split("|")[0].strip()
-                        analysis["score"] = int(score_part.split("/")[0])
-                    except:
-                        pass
-                
-                if "PIWO:" in ai_text:
-                    try:
-                        beer_part = ai_text.split("PIWO:")[1].split("|")[0].strip()
-                        analysis["beer"] = beer_part
-                    except:
-                        pass
-                
-                if "STYL:" in ai_text:
-                    try:
-                        style_part = ai_text.split("STYL:")[1].split("|")[0].strip()
-                        analysis["style"] = style_part
-                    except:
-                        pass
-                
-                if "WIADOMOŚĆ:" in ai_text:
-                    try:
-                        msg_part = ai_text.split("WIADOMOŚĆ:")[1].strip()
-                        analysis["message"] = msg_part
-                    except:
-                        pass
-                
-                return analysis
-            else:
-                return self._get_fallback_analysis(weather_data)
-                
         except Exception as e:
-            logger.error(f"❌ Błąd DeepSeek AI: {e}")
-            return self._get_fallback_analysis(weather_data)
+            logger.error(f"❌ Błąd planowania: {e}")
+            return None
     
-    def _get_fallback_analysis(self, weather_data):
-        """Fallback analizy toastu"""
-        temp = weather_data.get('temp', 20)
+    async def get_full_report(self, point_name: str) -> Dict:
+        """Wygeneruj pełny raport obserwacyjny"""
+        point = self.observation_points.get(point_name)
+        if not point:
+            return {"error": "Nieznany punkt"}
         
-        if temp > 25:
-            beer = "Chłodny Lager lub Pszeniczne"
-            style = "Orzeźwiający"
-        elif temp > 15:
-            beer = "Amber Ale lub IPA"
-            style = "Klimatyczny"
-        elif temp > 5:
-            beer = "Ciemny Porter lub Stout"
-            style = "Dostojny"
-        else:
-            beer = "Ciepłe Piwo Korzenne"
-            style = "Rozgrzewający"
-        
-        return {
-            "score": 8,
-            "beer": beer,
-            "style": style,
-            "message": "Do gwiazd i dalej!",
-            "source": "System Fallback"
+        report = {
+            "point": point.__dict__,
+            "timestamp": datetime.now().isoformat(),
+            "observations": [],
+            "earthquakes": [],
+            "weather": None,
+            "ai_analysis": None,
+            "maps": []
         }
+        
+        # 1. Obserwacje satelitarne
+        observation_sats = [s for s in self.tle_manager.satellites.values() 
+                          if s.type in ["observation", "station"]]
+        
+        for sat in observation_sats[:5]:
+            passes = self.predictor.predict_passes(sat.norad_id, point, days_ahead=2)
+            if passes:
+                best = max(passes, key=lambda x: x['probability'])
+                report["observations"].append({
+                    "satellite": sat.name,
+                    "time": best['max_time'].isoformat(),
+                    "elevation": best['max_elevation'],
+                    "probability": best['probability'],
+                    "duration": best['duration_min']
+                })
+        
+        # 2. Trzęsienia ziemi w pobliżu
+        earthquakes = self.usgs.get_recent_earthquakes(min_magnitude=4.0, hours=48)
+        nearby_quakes = []
+        
+        for quake in earthquakes[:5]:
+            # Oblicz odległość od punktu
+            distance = self.calculate_distance(
+                point.lat, point.lon, quake.lat, quake.lon
+            )
+            
+            if distance < 1000:  # 1000 km
+                nearby_quakes.append({
+                    "place": quake.place,
+                    "magnitude": quake.magnitude,
+                    "time": quake.time.isoformat(),
+                    "distance_km": distance
+                })
+        
+        report["earthquakes"] = nearby_quakes
+        
+        # 3. Pogoda
+        if self.weather:
+            weather = self.weather.get_current_weather(point.lat, point.lon)
+            if weather.get('success', False):
+                report["weather"] = {
+                    "temperature": weather['temp'],
+                    "conditions": weather['description'],
+                    "clouds": weather['clouds'],
+                    "score": self.weather.calculate_observation_score(weather)
+                }
+        
+        # 4. Mapy
+        if self.mapbox:
+            markers = [{'lat': point.lat, 'lon': point.lon, 'color': 'ff0000'}]
+            report["maps"].append({
+                "type": "location",
+                "url": self.mapbox.generate_satellite_map(point.lat, point.lon, markers)
+            })
+        
+        # 5. Analiza AI
+        if self.deepseek and report["observations"]:
+            best_obs = max(report["observations"], key=lambda x: x['probability'])
+            prompt = f"Przeanalizuj obserwację satelity {best_obs['satellite']} nad {point.name} o {best_obs['time']}. Elewacja: {best_obs['elevation']}°. Warunki pogodowe: {report['weather'] if report['weather'] else 'nieznane'}. Oceń jakość obserwacji i daj praktyczne porady."
+            report["ai_analysis"] = await self.deepseek.analyze_async(prompt, 500)
+        
+        return report
     
-    def get_astronomy_tip(self):
-        """Pobierz losową wskazówkę astronomiczną"""
-        tips = [
-            "Użyj aplikacji SkyView lub Stellarium do identyfikacji obiektów.",
-            "Zacznij obserwacje od Księżyca i jasnych planet jak Wenus czy Jowisz.",
-            "Unikaj obserwacji przy pełni Księżyca - rozjaśnia niebo.",
-            "Poczekaj 20-30 minut po wyjściu, aby oczy przyzwyczaiły się do ciemności.",
-            "Użyj czerwonej latarki - nie niszczy noktowizji.",
-            "Sprawdź fazę księżyca przed planowaniem obserwacji.",
-            "Szukaj miejsc z dala od świateł miejskich.",
-            "Zaplanuj obserwacje na bezchmurną noc po północy."
-        ]
-        return tips[datetime.now().second % len(tips)]
+    def calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Oblicz odległość między punktami w km"""
+        R = 6371
+        
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        a = (math.sin(delta_lat/2) ** 2 + 
+             math.cos(lat1_rad) * math.cos(lat2_rad) * 
+             math.sin(delta_lon/2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
 
-# ====================== INICJALIZACJA MODUŁÓW ======================
-mapbox_provider = MapboxProvider(MAPBOX_API_KEY)
-toast_module = SatelliteToast(mapbox_provider)
-deepseek_ai = DeepSeekAI()
+# ====================== FLASK APP ======================
+app = Flask(__name__)
+observation_system = EarthObservationSystem()
 
-# ====================== BAZA DANYCH ======================
-def init_database():
-    """Inicjalizacja bazy danych"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    # Tabela użytkowników
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            chat_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            toasts_count INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Tabela toastów
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS toasts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            city TEXT,
-            satellite TEXT,
-            toast_time TEXT,
-            spot_name TEXT,
-            success BOOLEAN,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+@app.route('/')
+def home():
+    return '''
+    <h1>🌍 Earth Observation Platform v6.0</h1>
+    <p><b>Zintegrowany system obserwacji Ziemi</b></p>
+    <ul>
+        <li>🛰️ Śledzenie satelitów (Skyfield)</li>
+        <li>🚨 Alerty USGS (trzęsienia ziemi)</li>
+        <li>🪐 Dane NASA (asteroidy, APOD)</li>
+        <li>🗺️ Mapy Mapbox</li>
+        <li>🧠 Analiza AI DeepSeek</li>
+        <li>🌤️ Pogoda OpenWeather</li>
+    </ul>
+    <p>Bot Telegram gotowy do działania!</p>
+    '''
 
-def log_toast(chat_id, city, satellite, toast_time, spot_name, success=True):
-    """Zapisz toast do bazy danych"""
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Webhook Telegram"""
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        data = request.get_json()
         
-        cursor.execute('''
-            INSERT INTO toasts (chat_id, city, satellite, toast_time, spot_name, success)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (chat_id, city, satellite, toast_time, spot_name, success))
+        if "message" in data:
+            chat_id = data["message"]["chat"]["id"]
+            text = data["message"].get("text", "").strip().lower()
+            
+            # Prosta obsługa komend
+            if text.startswith("/start"):
+                send_message(chat_id, start_message())
+            elif text.startswith("/help"):
+                send_message(chat_id, help_message())
+            elif text.startswith("/points"):
+                send_message(chat_id, points_message())
+            elif text.startswith("/satellites"):
+                send_message(chat_id, satellites_message())
+            elif text.startswith("/observe"):
+                handle_observe(chat_id, text)
+            elif text.startswith("/schedule"):
+                handle_schedule(chat_id, text)
+            elif text.startswith("/earthquakes"):
+                handle_earthquakes(chat_id, text)
+            elif text.startswith("/asteroids"):
+                handle_asteroids(chat_id)
+            elif text.startswith("/apod"):
+                handle_apod(chat_id)
+            elif text.startswith("/weather"):
+                handle_weather(chat_id, text)
+            elif text.startswith("/fullreport"):
+                asyncio.run(handle_fullreport(chat_id, text))
+            else:
+                send_message(chat_id, 
+                    "🛰️ <b>EARTH OBSERVATION PLATFORM</b>\n\n"
+                    "Użyj /help aby zobaczyć dostępne komendy."
+                )
         
-        # Zaktualizuj licznik toastów użytkownika
-        cursor.execute('''
-            UPDATE users SET toasts_count = toasts_count + 1 WHERE chat_id = ?
-        ''', (chat_id,))
-        
-        conn.commit()
-        conn.close()
-        return True
+        return jsonify({"status": "ok"}), 200
     except Exception as e:
-        logger.error(f"Błąd zapisu toastu: {e}")
-        return False
+        logger.error(f"❌ Webhook error: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
 
-def get_user_toasts(chat_id):
-    """Pobierz historię toastów użytkownika"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT city, satellite, toast_time, spot_name, created_at 
-            FROM toasts 
-            WHERE chat_id = ? 
-            ORDER BY created_at DESC 
-            LIMIT 10
-        ''', (chat_id,))
-        
-        toasts = cursor.fetchall()
-        conn.close()
-        
-        return toasts
-    except:
-        return []
-
-# ====================== FUNKCJE POMOCNICZE ======================
-def get_weather_data(city_key):
-    """Pobierz dane pogodowe dla miasta"""
-    city = OBSERVATION_CITIES.get(city_key)
-    if not city:
-        return None
-    
-    try:
-        url = f"{OPENWEATHER_BASE_URL}/weather"
-        params = {
-            "lat": city["lat"],
-            "lon": city["lon"],
-            "appid": OPENWEATHER_API_KEY,
-            "units": "metric",
-            "lang": "pl"
-        }
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        
-        return {
-            "temp": round(data["main"]["temp"], 1),
-            "feels_like": round(data["main"]["feels_like"], 1),
-            "humidity": data["main"]["humidity"],
-            "pressure": data["main"]["pressure"],
-            "wind_speed": round(data["wind"]["speed"], 1),
-            "description": data["weather"][0]["description"],
-            "clouds": data["clouds"]["all"],
-            "visibility": round(data.get("visibility", 10000) / 1000, 1),
-            "sunrise": datetime.fromtimestamp(data["sys"]["sunrise"]).strftime("%H:%M"),
-            "sunset": datetime.fromtimestamp(data["sys"]["sunset"]).strftime("%H:%M")
-        }
-    except Exception as e:
-        logger.error(f"Weather API error: {e}")
-        return None
-
-def calculate_moon_phase():
-    """Oblicz fazę księżyca"""
-    now = datetime.now()
-    # Proste obliczenia fazy księżyca
-    days_since_new = (now - datetime(2024, 1, 11)).days % 29.53
-    
-    if days_since_new < 1:
-        return {"name": "Nów", "emoji": "🌑", "illumination": 0}
-    elif days_since_new < 7.4:
-        illum = (days_since_new / 7.4) * 50
-        return {"name": "Rosnący sierp", "emoji": "🌒", "illumination": round(illum, 1)}
-    elif days_since_new < 14.8:
-        return {"name": "Pełnia", "emoji": "🌕", "illumination": 100}
-    else:
-        illum = 100 - ((days_since_new - 14.8) / 14.73) * 50
-        return {"name": "Malejący sierp", "emoji": "🌘", "illumination": round(illum, 1)}
-
-def get_nasa_apod():
-    """Pobierz Astronomy Picture of the Day"""
-    try:
-        url = f"{NASA_APOD_URL}?api_key={NASA_API_KEY}"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        return {
-            "title": data.get("title", "NASA APOD"),
-            "url": data.get("url", ""),
-            "explanation": data.get("explanation", ""),
-            "date": data.get("date", "")
-        }
-    except:
-        return None
-
-# ====================== TELEGRAM FUNCTIONS ======================
-def send_telegram_message(chat_id, text, parse_mode="HTML"):
-    """Wyślij wiadomość na Telegram"""
+def send_message(chat_id: int, text: str, parse_html: bool = True):
+    """Wyślij wiadomość Telegram"""
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": parse_mode,
+        "parse_mode": "HTML" if parse_html else None,
         "disable_web_page_preview": True
     }
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        logger.error(f"Telegram error: {e}")
-        return None
+        logger.error(f"❌ Send message error: {e}")
 
-def send_photo(chat_id, photo_url, caption=""):
-    """Wyślij zdjęcie"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    payload = {
-        "chat_id": chat_id,
-        "photo": photo_url,
-        "caption": caption,
-        "parse_mode": "HTML"
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Telegram photo error: {e}")
-        return None
+def start_message() -> str:
+    return """
+🚀 <b>EARTH OBSERVATION PLATFORM v6.0</b>
 
-def send_location(chat_id, lat, lon):
-    """Wyślij lokalizację"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendLocation"
-    payload = {
-        "chat_id": chat_id,
-        "latitude": lat,
-        "longitude": lon
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
-    except:
-        return None
+🌍 <b>Kompletny system obserwacji Ziemi:</b>
+• 🛰️ Śledzenie satelitów
+• 🚨 Alerty trzęsień ziemi (USGS)
+• 🪐 Przeloty asteroid (NASA)
+• 🗺️ Mapy i wizualizacje
+• 🧠 Analiza AI
+• 🌤️ Warunki pogodowe
 
-# ====================== FLASK APP ======================
-app = Flask(__name__)
+📋 <b>Główne komendy:</b>
+<code>/points</code> - punkty obserwacyjne
+<code>/observe [punkt]</code> - znajdź obserwacje
+<code>/schedule [punkt] [id_satelity]</code> - zaplanuj obserwację
+<code>/earthquakes</code> - ostatnie trzęsienia ziemi
+<code>/fullreport [punkt]</code> - pełny raport z AI
 
-# Globalne zmienne
-last_ping_time = datetime.now()
-ping_count = 0
-init_database()
+📡 <b>Przykłady:</b>
+• <code>/observe warszawa_centrum</code>
+• <code>/schedule warszawa_centrum 25544</code> (ISS)
+• <code>/fullreport krakow</code>
 
-@app.route('/')
-def home():
-    """Strona główna"""
-    global last_ping_time, ping_count
-    last_ping_time = datetime.now()
-    ping_count += 1
-    
-    html = '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🤖 SENTRY ONE v14.0 - TOAST EDITION</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #0a0a2a 0%, #1a1a4a 100%);
-                color: white;
-                padding: 20px;
-                text-align: center;
-            }
-            .container {
-                max-width: 900px;
-                margin: 0 auto;
-                background: rgba(255,255,255,0.1);
-                border-radius: 20px;
-                padding: 40px;
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255,255,255,0.2);
-                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            }
-            .toast-animation {
-                font-size: 4em;
-                margin: 30px 0;
-                animation: float 3s ease-in-out infinite;
-            }
-            @keyframes float {
-                0%, 100% { transform: translateY(0) rotate(0deg); }
-                33% { transform: translateY(-20px) rotate(5deg); }
-                66% { transform: translateY(-10px) rotate(-5deg); }
-            }
-            .btn {
-                display: inline-block;
-                padding: 15px 30px;
-                background: linear-gradient(to right, #FFD700, #FFA500);
-                color: #000;
-                text-decoration: none;
-                border-radius: 15px;
-                font-weight: bold;
-                margin: 15px;
-                transition: all 0.3s;
-                border: 2px solid rgba(255,255,255,0.3);
-                font-size: 16px;
-            }
-            .btn:hover { 
-                transform: translateY(-5px);
-                box-shadow: 0 10px 20px rgba(255, 215, 0, 0.4);
-            }
-            .status-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 20px;
-                margin: 40px 0;
-            }
-            .status-card {
-                background: rgba(0,0,0,0.3);
-                padding: 20px;
-                border-radius: 15px;
-                text-align: center;
-                border: 1px solid rgba(255,255,255,0.1);
-            }
-            .city-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                gap: 15px;
-                margin: 30px 0;
-            }
-            .city-card {
-                background: rgba(255,255,255,0.05);
-                padding: 15px;
-                border-radius: 10px;
-                font-size: 1.2em;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="toast-animation">🍻🛰️✨</div>
-            <h1>🤖 SENTRY ONE v14.0</h1>
-            <h2>TOAST EDITION 🍻🚀</h2>
-            <h3>Wyjdź z piwem, znajdź miejsce, wznieś toast do satelity!</h3>
-            
-            <div class="status-grid">
-                <div class="status-card">
-                    <h4>🗺️ Mapbox</h4>
-                    <p>''' + ('✅ Aktywny' if mapbox_provider.available else '❌ Brak klucza') + '''</p>
-                </div>
-                <div class="status-card">
-                    <h4>🧠 DeepSeek AI</h4>
-                    <p>''' + ('✅ Online' if deepseek_ai.available else '❌ Offline') + '''</p>
-                </div>
-                <div class="status-card">
-                    <h4>🛰️ Satelity</h4>
-                    <p>''' + str(len(SATELLITES)) + ''' dostępnych</p>
-                </div>
-                <div class="status-card">
-                    <h4>📍 Miasta</h4>
-                    <p>''' + str(len(OBSERVATION_CITIES)) + ''' dostępne</p>
-                </div>
-            </div>
-            
-            <div style="margin: 40px 0;">
-                <h3>🍻 Jak działa Toast do Satelity?</h3>
-                <p>1. Użyj komendy <code>/toast [miasto]</code></p>
-                <p>2. Bot znajdzie przelot satelity nad Twoim miastem</p>
-                <p>3. Wskaże Ci idealne miejsce i godzinę</p>
-                <p>4. Wyjdź z piwem i wznieś toast do satelity!</p>
-                <p>5. Otrzymasz "zdjęcie satelitarne" z toastu! 🛰️📸</p>
-            </div>
-            
-            <div class="city-grid">
-                <div class="city-card">🏛️ Warszawa</div>
-                <div class="city-card">🌲 Koszalin</div>
-                <div class="city-card">🐉 Kraków</div>
-            </div>
-            
-            <div style="margin: 40px 0;">
-                <a href="https://t.me/PcSentintel_Bot" target="_blank" class="btn">
-                    💬 Otwórz bota w Telegram
-                </a>
-                <a href="/health" class="btn" style="background: linear-gradient(to right, #00c6ff, #0072ff);">
-                    🏥 Status zdrowia
-                </a>
-                <a href="/ping" class="btn" style="background: linear-gradient(to right, #f46b45, #eea849);">
-                    📡 Test ping
-                </a>
-            </div>
-            
-            <div style="background: rgba(255,215,0,0.1); padding: 25px; border-radius: 15px; margin: 30px 0;">
-                <h4>🚀 System aktywny!</h4>
-                <p>Ping count: ''' + str(ping_count) + ''' | Ostatni ping: ''' + last_ping_time.strftime('%H:%M:%S') + '''</p>
-                <p>Gotowość toastowa: <span style="color: #FFD700;">100%</span></p>
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
-    return html
-
-@app.route('/health')
-def health():
-    """Status zdrowia"""
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "14.0 Toast Edition",
-        "services": {
-            "mapbox": mapbox_provider.available,
-            "deepseek_ai": deepseek_ai.available,
-            "nasa_api": bool(NASA_API_KEY),
-            "telegram_bot": True
-        },
-        "statistics": {
-            "cities": len(OBSERVATION_CITIES),
-            "satellites": len(SATELLITES),
-            "ping_count": ping_count,
-            "mapbox_status": "active" if mapbox_provider.available else "inactive"
-        }
-    })
-
-@app.route('/ping')
-def ping():
-    """Test ping"""
-    global last_ping_time, ping_count
-    last_ping_time = datetime.now()
-    ping_count += 1
-    return jsonify({
-        "status": "pong",
-        "ping_count": ping_count,
-        "time": last_ping_time.isoformat(),
-        "message": "Toast system ready! 🍻🛰️"
-    })
-
-# ====================== WEBHOOK I KOMENDY ======================
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Webhook Telegram - główny endpoint"""
-    global last_ping_time, ping_count
-    
-    try:
-        data = request.get_json()
-        logger.info(f"📩 Webhook odebrany od Telegrama")
-        
-        if "message" in data:
-            message = data["message"]
-            chat_id = message["chat"]["id"]
-            text = message.get("text", "").strip()
-            
-            # Obsługa komend
-            if text.startswith("/"):
-                handle_command(chat_id, text.lower())
-            else:
-                # Obsługa wiadomości tekstowych
-                handle_text_message(chat_id, text)
-        
-        return jsonify({"status": "ok"}), 200
-        
-    except Exception as e:
-        logger.error(f"🔥 Błąd webhook: {e}")
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-def handle_command(chat_id, command):
-    """Obsłuż komendę od użytkownika"""
-    
-    if command == "/start":
-        welcome = f"""
-🤖 <b>SENTRY ONE v14.0 - TOAST EDITION</b>
-
-🍻 <b>NOWOŚĆ: TOAST DO SATELITY!</b>
-Wyjdź z piwem, znajdź miejsce, wznieś toast do satelity na orbicie!
-
-<b>🌍 DOSTĘPNE MIASTA:</b>
-🏛️ Warszawa - <code>/toast warszawa</code>
-🌲 Koszalin - <code>/toast koszalin</code>
-🐉 Kraków - <code>/toast krakow</code>
-
-<b>📋 GŁÓWNE KOMENDY:</b>
-<code>/toast [miasto]</code> - Zaplanuj toast do satelity
-<code>/weather [miasto]</code> - Sprawdź pogodę
-<code>/moon</code> - Faza księżyca
-<code>/nasa</code> - Zdjęcie dnia NASA
-<code>/help</code> - Wszystkie komendy
-
-<b>🎯 TYDZIEŃ PRÓBNY:</b>
-• Mapbox: {'✅ Aktywny' if mapbox_provider.available else '❌ Brak'}
-• DeepSeek AI: {'✅ Online' if deepseek_ai.available else '❌ Offline'}
-
-🚀 <b>Gotów na kosmiczny toast?</b>
-        """
-        send_telegram_message(chat_id, welcome)
-    
-    elif command == "/help":
-        help_text = """
-🍻 <b>SENTRY ONE - TOAST EDITION - WSZYSTKIE KOMENDY</b>
-
-<b>🛰️ KOMENDY TOASTU:</b>
-<code>/toast warszawa</code> - Zaplanuj toast w Warszawie
-<code>/toast koszalin</code> - Zaplanuj toast w Koszalinie
-<code>/toast krakow</code> - Zaplanuj toast w Krakowie
-<code>/toast_quote</code> - Losowy cytat na toast
-<code>/my_toasts</code> - Twoja historia toastów
-
-<b>🌤️ POGODA I ASTRONOMIA:</b>
-<code>/weather warszawa</code> - Pogoda dla Warszawy
-<code>/weather koszalin</code> - Pogoda dla Koszalina
-<code>/weather krakow</code> - Pogoda dla Krakowa
-<code>/moon</code> - Aktualna faza księżyca
-<code>/nasa</code> - Astronomy Picture of the Day
-
-<b>🗺️ MAPY I LOKALIZACJA:</b>
-<code>/map warszawa</code> - Mapa Warszawy (zdjęcie satelitarne)
-<code>/map koszalin</code> - Mapa Koszalina
-<code>/map krakow</code> - Mapa Krakowa
-
-<b>🧠 AI I SYSTEM:</b>
-<code>/ai_tip</code> - Wskazówka od AI
-<code>/status</code> - Status systemu
-<code>/ping</code> - Test połączenia
-<code>/satellites</code> - Lista śledzonych satelit
-
-<b>📍 PRZYKŁAD:</b> <code>/toast warszawa</code>
-        """
-        send_telegram_message(chat_id, help_text)
-    
-    elif command.startswith("/toast "):
-        parts = command.split()
-        if len(parts) == 2 and parts[1] in OBSERVATION_CITIES:
-            city_key = parts[1]
-            city = OBSERVATION_CITIES[city_key]
-            
-            # Pobierz przelot satelity
-            satellite_pass = toast_module.get_next_satellite_pass(city_key)
-            
-            if satellite_pass and satellite_pass.get("success"):
-                # Wybierz miejsce
-                spot = toast_module.generate_toast_spot(city_key)
-                
-                # Pobierz pogodę
-                weather = get_weather_data(city_key)
-                
-                # Generuj instrukcje
-                instructions = toast_module.get_toast_instructions(
-                    city_key, satellite_pass, spot, weather
-                )
-                
-                # Dodaj analizę AI jeśli dostępna
-                if deepseek_ai.available and weather:
-                    ai_analysis = deepseek_ai.analyze_toast_conditions(
-                        city["name"], weather, satellite_pass
-                    )
-                    
-                    instructions += f"\n🧠 <b>ANALIZA DEEPSEEK AI:</b>\n"
-                    instructions += f"• Ocena toastu: {ai_analysis['score']}/10\n"
-                    instructions += f"• Idealne piwo: {ai_analysis['beer']}\n"
-                    instructions += f"• Styl: {ai_analysis['style']}\n"
-                    instructions += f"• Wiadomość do satelity: \"{ai_analysis['message']}\"\n"
-                
-                # Dodaj cytat
-                instructions += f"\n💫 <b>CYTAT NA TOAST:</b>\n{toast_module.get_toast_quote()}"
-                
-                # Wyślij główną wiadomość
-                send_telegram_message(chat_id, instructions)
-                
-                # Wyślij lokalizację miejsca
-                send_location(chat_id, spot["lat"], spot["lon"])
-                
-                # Zapisz toast w bazie
-                log_toast(chat_id, city["name"], satellite_pass["satellite"], 
-                         satellite_pass["max_time"], spot["name"])
-                
-                # Zaplanuj wysłanie "zdjęcia satelitarnego" (po 8 sekundach)
-                threading.Timer(8.0, send_satellite_photo, args=[chat_id, spot, satellite_pass]).start()
-                
-            else:
-                error_msg = f"""
-❌ <b>BRAK SATELITY W ZASIĘGU!</b>
-
-W {city['name']} nie ma widocznych przelotów satelitów w ciągu najbliższych 24h.
-
-🍻 <b>Alternatywny plan:</b>
-1. Weź piwo i wyjdź na zewnątrz o 21:00
-2. Znajdź miejsce z widokiem na niebo
-3. Wznieś toast do gwiazd
-4. Satelity i tak Cię widzą! 🛰️
-
-💫 Spróbuj ponownie jutro lub użyj <code>/weather {city_key}</code>.
-                """
-                send_telegram_message(chat_id, error_msg)
-        else:
-            cities = ", ".join([f"<code>/toast {k}</code>" for k in OBSERVATION_CITIES.keys()])
-            send_telegram_message(chat_id, f"❌ Dostępne miasta: {cities}")
-    
-    elif command == "/toast_quote":
-        quote = toast_module.get_toast_quote()
-        send_telegram_message(chat_id, f"💫 <b>CYTAT NA TOAST:</b>\n\n{quote}")
-    
-    elif command == "/my_toasts":
-        toasts = get_user_toasts(chat_id)
-        if toasts:
-            response = "📜 <b>TWOJA HISTORIA TOASTÓW:</b>\n\n"
-            for i, (city, satellite, toast_time, spot_name, created_at) in enumerate(toasts, 1):
-                date = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").strftime("%d.%m %H:%M")
-                response += f"{i}. {date} - {city}\n"
-                response += f"   🛰️ {satellite}\n"
-                response += f"   📍 {spot_name}\n"
-                response += f"   ⏰ {toast_time}\n\n"
-            
-            response += f"🍻 Łączna liczba toastów: {len(toasts)}"
-        else:
-            response = "📜 <b>Jeszcze nie wzniósłeś żadnego toastu!</b>\n\nUżyj <code>/toast [miasto]</code> aby rozpocząć!"
-        
-        send_telegram_message(chat_id, response)
-    
-    elif command.startswith("/weather"):
-        parts = command.split()
-        if len(parts) == 2 and parts[1] in OBSERVATION_CITIES:
-            city_key = parts[1]
-            city = OBSERVATION_CITIES[city_key]
-            weather = get_weather_data(city_key)
-            
-            if weather:
-                # Pobierz fazę księżyca
-                moon = calculate_moon_phase()
-                
-                response = f"""
-{city['emoji']} <b>POGODA - {city['name'].upper()}</b>
-
-🌡️ Temperatura: {weather['temp']}°C
-🌡️ Odczuwalna: {weather['feels_like']}°C
-💨 Wiatr: {weather['wind_speed']} m/s
-💧 Wilgotność: {weather['humidity']}%
-☁️ Zachmurzenie: {weather['clouds']}%
-👁️ Widoczność: {weather['visibility']} km
-🌅 Wschód: {weather['sunrise']} | 🌇 Zachód: {weather['sunset']}
-
-{moon['emoji']} <b>Księżyc:</b> {moon['name']} ({moon['illumination']}%)
-
-📱 <b>OCENA WARUNKÓW DO TOASTU:</b>
-• Zachmurzenie: {'✅ Niskie' if weather['clouds'] < 30 else '⚠️ Umiarkowane' if weather['clouds'] < 70 else '❌ Wysokie'}
-• Temperatura: {'✅ Idealna na piwo!' if 10 <= weather['temp'] <= 25 else '🧥 Weź kurtkę!' if weather['temp'] < 10 else '🥶 Zimne piwo!'}
-• Wiatr: {'✅ Łagodny' if weather['wind_speed'] < 5 else '⚠️ Umiarkowany' if weather['wind_speed'] < 10 else '❌ Silny'}
-
-🍻 <b>NAJLEPSZY CZAS NA TOAST:</b> 1-2 godziny po zachodzie słońca
-
-Użyj <code>/toast {city_key}</code> aby zaplanować toast!
-                """
-                send_telegram_message(chat_id, response)
-            else:
-                send_telegram_message(chat_id, f"❌ Nie udało się pobrać pogody dla {city['name']}")
-        else:
-            cities = ", ".join([f"<code>/weather {k}</code>" for k in OBSERVATION_CITIES.keys()])
-            send_telegram_message(chat_id, f"❌ Dostępne miasta: {cities}")
-    
-    elif command.startswith("/map"):
-        parts = command.split()
-        if len(parts) == 2 and parts[1] in OBSERVATION_CITIES:
-            city_key = parts[1]
-            city = OBSERVATION_CITIES[city_key]
-            
-            # Pobierz zdjęcie satelitarne miasta
-            image_url = mapbox_provider.get_satellite_image(city["lat"], city["lon"], zoom=12)
-            
-            caption = f"""
-🗺️ <b>MAPA SATELITARNA - {city['name'].upper()}</b>
-
-📍 Lokalizacja: {city['name']}, {city['country']}
-🌐 Współrzędne: {city['lat']:.4f}°, {city['lon']:.4f}°
-🛰️ Źródło: Mapbox Satellite
-
-🍻 <b>Miejsca do toastu w {city['name']}:</b>
+🚀 <b>Zaczynajmy!</b> <code>/points</code>
 """
-            # Dodaj miejsca do toastu
-            for i, spot in enumerate(city.get("toast_spots", [])[:3], 1):
-                caption += f"\n{i}. {spot.get('emoji', '📍')} <b>{spot['name']}</b>"
-                caption += f"\n   {spot['desc']}"
-            
-            caption += f"\n\nUżyj <code>/toast {city_key}</code> aby zaplanować toast w tym mieście!"
-            
-            send_photo(chat_id, image_url, caption)
-        else:
-            cities = ", ".join([f"<code>/map {k}</code>" for k in OBSERVATION_CITIES.keys()])
-            send_telegram_message(chat_id, f"❌ Dostępne miasta: {cities}")
+
+def help_message() -> str:
+    return """
+📋 <b>DOSTĘPNE KOMENDY</b>
+
+<b>🌍 PUNKTY OBSERWACYJNE:</b>
+<code>/points</code> - lista punktów
+
+<b>🛰️ OBSERWACJE SATELITARNE:</b>
+<code>/observe [punkt]</code> - znajdź przeloty
+<code>/schedule [punkt] [id]</code> - zaplanuj obserwację
+<code>/satellites</code> - lista satelitów
+
+<b>🚨 ALERTY ZDARZEŃ:</b>
+<code>/earthquakes</code> - trzęsienia ziemi
+<code>/asteroids</code> - przeloty asteroid
+<code>/apod</code> - zdjęcie dnia NASA
+
+<b>🌤️ POGODA I RAPORTY:</b>
+<code>/weather [punkt]</code> - aktualna pogoda
+<code>/fullreport [punkt]</code> - pełny raport z AI
+
+<b>🛰️ DOSTĘPNE SATELITY:</b>
+• 25544 - ISS (stacja kosmiczna)
+• 39084 - Landsat 8 (obserwacja Ziemi)
+• 40697 - Sentinel-2A (obserwacja)
+• 42969 - Sentinel-2B (obserwacja)
+• 49260 - Landsat 9 (obserwacja Ziemi)
+• 43013 - NOAA-20 (pogoda)
+"""
+
+def points_message() -> str:
+    points = observation_system.observation_points
+    message = "📍 <b>DOSTĘPNE PUNKTY OBSERWACYJNE:</b>\n\n"
     
-    elif command == "/moon":
-        moon = calculate_moon_phase()
-        response = f"""
-{moon['emoji']} <b>FAZA KSIĘŻYCA</b>
-
-• Nazwa: {moon['name']}
-• Oświetlenie: {moon['illumination']}%
-
-<b>WPŁYW NA OBSERWACJE:</b>
-• {moon['name']} {'❌ utrudnia obserwacje' if moon['illumination'] > 70 else '✅ sprzyja obserwacjom' if moon['illumination'] < 30 else '⚠️ częściowo utrudnia'}
-• Najlepszy czas: 3 dni przed i po nowiu
-• Unikaj pełni dla obserwacji gwiazd
-
-<b>DOBRZE NA TOAST GDY:</b>
-• Księżyc nie jest w pełni
-• Bezchmurne niebo
-• Po zachodzie słońca
-
-🌌 <b>Sprawdź warunki:</b> <code>/weather [miasto]</code>
-        """
-        send_telegram_message(chat_id, response)
+    for name, point in points.items():
+        message += f"• <b>{name}</b>\n"
+        message += f"  📍 {point.name}\n"
+        message += f"  🌍 {point.lat:.4f}, {point.lon:.4f}\n\n"
     
-    elif command == "/nasa":
-        apod = get_nasa_apod()
-        if apod and apod.get("url"):
-            caption = f"""
-🛰️ <b>NASA ASTRONOMY PICTURE OF THE DAY</b>
+    message += "🎯 <b>Użyj:</b> <code>/observe [nazwa_punktu]</code>"
+    return message
 
-<b>{apod['title']}</b>
-📅 {apod['date']}
+def satellites_message() -> str:
+    satellites = observation_system.tle_manager.satellites
+    message = "🛰️ <b>DOSTĘPNE SATELITY:</b>\n\n"
+    
+    for sat_id, sat in satellites.items():
+        message += f"• <b>{sat_id}</b> - {sat.name}\n"
+        message += f"  📷 {sat.camera} | 📡 {sat.type}\n"
+        message += f"  🎯 {sat.resolution_m}m | 🌐 {sat.swath_km}km\n\n"
+    
+    message += "📅 <b>Użyj:</b> <code>/schedule [punkt] [id_satelity]</code>"
+    return message
 
-{apod['explanation'][:300]}...
-            """
-            send_photo(chat_id, apod['url'], caption)
-        else:
-            # Fallback na losowe zdjęcie kosmosu
-            space_images = [
-                "https://images.unsplash.com/photo-1446776653964-20c1d3a81b06?w=800&h=600&fit=crop",
-                "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=800&h=600&fit=crop",
-                "https://images.unsplash.com/photo-1465101162946-4377e57745c3?w=800&h=600&fit=crop"
-            ]
-            send_photo(chat_id, random.choice(space_images), "🛰️ <b>NASA INSPIRACJA</b>\n\nDzisiejsze zdjęcie kosmosu dla Ciebie!")
+def handle_observe(chat_id: int, command: str):
+    parts = command.split()
     
-    elif command == "/ai_tip":
-        tip = deepseek_ai.get_astronomy_tip()
-        send_telegram_message(chat_id, f"🧠 <b>WSKAZÓWKA ASTRONOMICZNA OD AI:</b>\n\n{tip}")
+    if len(parts) < 2:
+        send_message(chat_id,
+            "❌ <b>Format:</b> <code>/observe [punkt]</code>\n\n"
+            "Przykład: <code>/observe warszawa_centrum</code>\n\n"
+            "Użyj <code>/points</code> aby zobaczyć punkty."
+        )
+        return
     
-    elif command == "/satellites":
-        response = "🛰️ <b>SATELITY ŚLEDZONE PRZEZ SYSTEM:</b>\n\n"
-        for key, sat in SATELLITES.items():
-            response += f"{sat['emoji']} <b>{sat['name']}</b>\n"
-            response += f"   Typ: {sat['type']}\n"
-            response += f"   ID: {sat['id']}\n\n"
+    point_name = parts[1]
+    point = observation_system.observation_points.get(point_name)
+    
+    if not point:
+        send_message(chat_id, "❌ Nieznany punkt obserwacyjny")
+        return
+    
+    send_message(chat_id, "🔍 Szukam obserwacji... Proszę czekać.")
+    
+    # Znajdź obserwacje
+    message = f"📡 <b>OBSERWACJE DLA {point.name.upper()}</b>\n\n"
+    
+    observation_sats = [s for s in observation_system.tle_manager.satellites.values() 
+                      if s.type in ["observation", "station"]]
+    
+    found = False
+    
+    for sat in observation_sats[:6]:
+        passes = observation_system.predictor.predict_passes(
+            sat.norad_id, point, days_ahead=2
+        )
         
-        response += "ℹ️ System automatycznie wybiera satelitę nadlatującą nad Twoje miasto."
-        send_telegram_message(chat_id, response)
+        if passes:
+            best = max(passes, key=lambda x: x['probability'])
+            
+            message += f"🛰️ <b>{sat.name}</b>\n"
+            message += f"   📅 {best['max_time'].strftime('%d.%m %H:%M')}\n"
+            message += f"   📈 {best['max_elevation']:.0f}° | 🎯 {best['probability']*100:.0f}%\n"
+            message += f"   ⏱️ {best['duration_min']:.0f} min\n"
+            message += f"   📷 {sat.camera}\n\n"
+            
+            found = True
     
-    elif command == "/status":
-        response = f"""
-📊 <b>STATUS SYSTEMU SENTRY ONE v14.0</b>
+    if not found:
+        message += "😔 Brak obserwacji w najbliższych 2 dniach.\n"
+        message += "Spróbuj później lub wybierz inny punkt."
+    
+    send_message(chat_id, message)
 
-🤖 Telegram Bot: ✅ AKTYWNY
-🗺️ Mapbox API: {'✅ AKTYWNY' if mapbox_provider.available else '❌ BRAK KLUCZA'}
-🧠 DeepSeek AI: {'✅ ONLINE' if deepseek_ai.available else '❌ OFFLINE'}
-🛰️ Satelity: {len(SATELLITES)} śledzonych
-📍 Miasta: {len(OBSERVATION_CITIES)} dostępne
-
-📡 <b>STATYSTYKI:</b>
-• Ping count: {ping_count}
-• Ostatni ping: {last_ping_time.strftime('%H:%M:%S')}
-• Wersja: Toast Edition v14.0
-
-🍻 <b>GOTOWOŚĆ TOASTOWA:</b> 100%
-🚀 <b>Użyj:</b> <code>/toast [miasto]</code>
-        """
-        send_telegram_message(chat_id, response)
+def handle_schedule(chat_id: int, command: str):
+    parts = command.split()
     
-    elif command == "/ping":
-        send_telegram_message(chat_id, f"🏓 <b>PONG!</b> System toastowy aktywny! Ping #{ping_count}")
+    if len(parts) < 3:
+        send_message(chat_id,
+            "❌ <b>Format:</b> <code>/schedule [punkt] [id_satelity]</code>\n\n"
+            "Przykład: <code>/schedule warszawa_centrum 25544</code>\n\n"
+            "Użyj <code>/satellites</code> aby zobaczyć dostępne satelity."
+        )
+        return
     
-    else:
-        send_telegram_message(chat_id, "❌ Nieznana komenda. Użyj /help aby zobaczyć dostępne komendy.")
-
-def handle_text_message(chat_id, text):
-    """Obsłuż wiadomość tekstową"""
-    text_lower = text.lower()
+    point_name = parts[1]
     
-    if any(word in text_lower for word in ["piwo", "beer", "toast", "satelita", "kosmos"]):
-        response = random.choice([
-            "Mówisz o piwie? 🍻 Użyj /toast [miasto] aby zaplanować toast do satelity!",
-            "Chcesz wznieść toast? 🚀 Sprawdź najpierw /weather [miasto]!",
-            "Rozmawiamy o kosmosie? 🛰️ Spróbuj /nasa dla dzisiejszego zdjęcia NASA!",
-            "Toast do satelity? To mój ulubiony temat! 🍻🛰️"
-        ])
-        send_telegram_message(chat_id, response)
-    
-    elif "dziękuję" in text_lower or "thanks" in text_lower:
-        send_telegram_message(chat_id, "🤖 Nie ma za co! Miłego toastu! 🍻")
-    
-    elif "pogoda" in text_lower:
-        send_telegram_message(chat_id, "🌤️ Sprawdź pogodę komendą: /weather [miasto]")
-    
-    else:
-        # Domyślna odpowiedź
-        send_telegram_message(chat_id, "🤖 Użyj /help aby zobaczyć dostępne komendy. 🍻🚀")
-
-def send_satellite_photo(chat_id, spot, satellite_pass):
-    """Wyślij symulowane zdjęcie satelitarne"""
     try:
-        # Spróbuj pobrać prawdziwe zdjęcie satelitarne z Mapbox
-        image_url = mapbox_provider.get_satellite_image(spot["lat"], spot["lon"])
-        
-        # Generuj podpis
-        caption = toast_module.generate_satellite_photo_caption(spot, satellite_pass)
-        
-        # Wyślij zdjęcie
-        result = send_photo(chat_id, image_url, caption)
-        
-        # Jeśli nie udało się wysłać, wyślij wiadomość tekstową
-        if not result or result.get("ok") != True:
-            send_telegram_message(chat_id, "🛰️📸 <b>Satelita zrobiła Ci zdjęcie!</b>\n\nNiestety nie mogę wysłać zdjęcia teraz, ale Twój toast został odebrany na orbicie! 🍻")
-            
-    except Exception as e:
-        logger.error(f"Błąd wysyłania zdjęcia: {e}")
-        send_telegram_message(chat_id, "🛰️ <b>TOAST ODEBRANY NA ORBICIE!</b>\n\nSatelita zarejestrowała Twój kosmiczny gest! Dziękujemy! 🍻🚀")
-
-# ====================== URUCHOMIENIE ======================
-if __name__ == "__main__":
-    print("\n" + "=" * 70)
-    print("🚀 URUCHAMIANIE SENTRY ONE v14.0 - TOAST EDITION")
-    print("=" * 70)
-    print(f"🗺️  Mapbox: {'✅ Aktywny' if mapbox_provider.available else '❌ Brak klucza'}")
-    print(f"🧠 DeepSeek AI: {'✅ Dostępny' if deepseek_ai.available else '❌ Niedostępny'}")
-    print(f"🛰️ Satelity: {len(SATELLITES)} dostępnych")
-    print(f"📍 Miasta: {len(OBSERVATION_CITIES)} dostępne")
-    print(f"🌐 Webhook URL: {WEBHOOK_URL}")
-    print(f"🔧 Port: {PORT}")
-    print("=" * 70)
-    print("🍻 System gotowy na kosmiczne toasty! 🚀")
-    print("=" * 70)
+        satellite_id = int(parts[2])
+    except ValueError:
+        send_message(chat_id, "❌ Nieprawidłowy ID satelity")
+        return
     
-    # Uruchom Flask
-    app.run(
-        host="0.0.0.0",
-        port=PORT,
-        debug=False,
-        use_reloader=False
+    # Zaplanuj obserwację
+    observation = observation_system.schedule_observation(chat_id, point_name, satellite_id)
+    
+    if not observation:
+        send_message(chat_id,
+            "❌ <b>BRAK OBSERWACJI</b>\n\n"
+            "Satelita nie przelatuje nad tym punktem w najbliższych 7 dniach."
+        )
+
+def handle_earthquakes(chat_id: int, command: str):
+    parts = command.split()
+    
+    min_magnitude = 4.0
+    hours = 24
+    
+    if len(parts) >= 2:
+        try:
+            min_magnitude = float(parts[1])
+        except:
+            pass
+    
+    if len(parts) >= 3:
+        try:
+            hours = int(parts[2])
+        except:
+            pass
+    
+    send_message(chat_id, f"🌋 Pobieram trzęsienia ziemi (> {min_magnitude}M) z {hours}h...")
+    
+    earthquakes = observation_system.usgs.get_recent_earthquakes(min_magnitude, hours)
+    
+    if not earthquakes:
+        send_message(chat_id, f"🌍 Brak trzęsień ziemi > {min_magnitude}M w ostatnich {hours}h.")
+        return
+    
+    message = f"🌋 <b>TRZĘSIENIA ZIEMI (>{min_magnitude}M, {hours}h):</b>\n\n"
+    
+    for i, quake in enumerate(earthquakes[:5], 1):
+        time_ago = datetime.utcnow() - quake.time
+        hours_ago = time_ago.total_seconds() / 3600
+        
+        message += f"{i}. <b>{quake.place}</b>\n"
+        message += f"   ⚡ <b>{quake.magnitude}M</b> | 📉 {quake.depth:.1f} km\n"
+        message += f"   ⏰ {hours_ago:.1f}h temu\n"
+        message += f"   🌍 {quake.lat:.3f}, {quake.lon:.3f}\n\n"
+    
+    if len(earthquakes) > 5:
+        message += f"... i {len(earthquakes) - 5} więcej\n"
+    
+    message += f"🔗 <a href='https://earthquake.usgs.gov/earthquakes/map/'>Mapa trzęsień</a>"
+    
+    send_message(chat_id, message)
+
+def handle_asteroids(chat_id: int):
+    send_message(chat_id, "🪐 Pobieram dane o asteroidach...")
+    
+    asteroids = observation_system.nasa.get_asteroids()
+    
+    if not asteroids:
+        send_message(chat_id, "🌍 Brak bliskich przelotów asteroid w ciągu 7 dni.")
+        return
+    
+    message = "🪐 <b>BLISKIE PRZELOTY ASTEROID (7 dni):</b>\n\n"
+    
+    for i, asteroid in enumerate(asteroids[:5], 1):
+        distance_mln_km = asteroid['miss_distance_km'] / 1000000
+        
+        message += f"{i}. <b>{asteroid['name']}</b>\n"
+        message += f"   📏 {asteroid['diameter_min']:.2f}-{asteroid['diameter_max']:.2f} km\n"
+        message += f"   🎯 {distance_mln_km:.2f} mln km\n"
+        message += f"   🚀 {asteroid['velocity_kps']:.2f} km/s\n"
+        message += f"   ⏰ {asteroid['approach_time']}\n"
+        message += f"   ⚠️ <b>{'NIEBEZPIECZNA' if asteroid['hazardous'] else 'Bezpieczna'}</b>\n\n"
+    
+    if len(asteroids) > 5:
+        message += f"... i {len(asteroids) - 5} więcej"
+    
+    send_message(chat_id, message)
+
+def handle_apod(chat_id: int):
+    apod = observation_system.nasa.get_apod()
+    
+    if not apod or 'url' not in apod:
+        send_message(chat_id, "❌ Nie udało się pobrać APOD")
+        return
+    
+    message = f"""
+🪐 <b>ASTRONOMY PICTURE OF THE DAY</b>
+
+📅 <b>{apod.get('date', 'Dzisiaj')}</b>
+🏷️ <b>{apod.get('title', 'Brak tytułu')}</b>
+
+📖 {apod.get('explanation', 'Brak opisu')[:300]}...
+
+👨‍🎨 <b>Autor:</b> {apod.get('copyright', 'Nieznany')}
+
+<a href="{apod['url']}">🔗 Zobacz pełne zdjęcie</a>
+"""
+    
+    send_message(chat_id, message)
+
+def handle_weather(chat_id: int, command: str):
+    parts = command.split()
+    
+    if len(parts) < 2:
+        send_message(chat_id,
+            "❌ <b>Format:</b> <code>/weather [punkt]</code>\n\n"
+            "Przykład: <code>/weather warszawa_centrum</code>"
+        )
+        return
+    
+    point_name = parts[1]
+    point = observation_system.observation_points.get(point_name)
+    
+    if not point:
+        send_message(chat_id, "❌ Nieznany punkt")
+        return
+    
+    if not observation_system.weather:
+        send_message(chat_id, "❌ Brak klucza OpenWeather API")
+        return
+    
+    send_message(chat_id, "🌤️ Pobieram dane pogodowe...")
+    
+    weather = observation_system.weather.get_current_weather(point.lat, point.lon)
+    
+    if not weather.get('success', False):
+        send_message(chat_id, "❌ Nie udało się pobrać pogody")
+        return
+    
+    score = observation_system.weather.calculate_observation_score(weather)
+    
+    message = f"""
+🌤️ <b>POGODA DLA {point.name.upper()}</b>
+
+🌡️ <b>Temperatura:</b> {weather['temp']:.1f}°C
+🤏 <b>Odczuwalna:</b> {weather['feels_like']:.1f}°C
+💧 <b>Wilgotność:</b> {weather['humidity']}%
+☁️ <b>Zachmurzenie:</b> {weather['clouds']}%
+👁️ <b>Widoczność:</b> {weather['visibility']:.1f} km
+💨 <b>Wiatr:</b> {weather['wind_speed']} m/s
+📖 <b>Opis:</b> {weather['description']}
+
+📊 <b>OCENA WARUNKÓW OBSERWACYJNYCH:</b>
+<b>{score:.1f}/10</b>
+
+{"✅ <b>Doskonale warunki!</b>" if score >= 8 else ""}
+{"⚠️ <b>Warunki średnie</b>" if 5 <= score < 8 else ""}
+{"❌ <b>Złe warunki do obserwacji</b>" if score < 5 else ""}
+"""
+    
+    send_message(chat_id, message)
+
+async def handle_fullreport(chat_id: int, command: str):
+    parts = command.split()
+    
+    if len(parts) < 2:
+        send_message(chat_id,
+            "❌ <b>Format:</b> <code>/fullreport [punkt]</code>\n\n"
+            "Przykład: <code>/fullreport warszawa_centrum</code>"
+        )
+        return
+    
+    point_name = parts[1]
+    
+    send_message(chat_id, 
+        "📊 Generuję pełny raport...\n"
+        "Pobieram dane z wszystkich API...\n"
+        "To może potrwać do 30 sekund."
     )
+    
+    try:
+        report = await observation_system.get_full_report(point_name)
+        
+        if "error" in report:
+            send_message(chat_id, f"❌ {report['error']}")
+            return
+        
+        message = f"""
+📊 <b>PEŁNY RAPORT OBSERWACYJNY</b>
+📍 <b>{point_name.upper()}</b>
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+<b>NAJLEPSZE OBSERWACJE:</b>
+"""
+        
+        for i, obs in enumerate(report["observations"][:3], 1):
+            message += f"\n{i}. 🛰️ <b>{obs['satellite']}</b>\n"
+            message += f"   ⏰ {datetime.fromisoformat(obs['time']).strftime('%d.%m %H:%M')}\n"
+            message += f"   📈 {obs['elevation']:.0f}° | 🎯 {obs['probability']*100:.0f}%\n"
+        
+        if report["earthquakes"]:
+            message += "\n<b>🚨 TRZĘSIENIA ZIEMI W POBLIŻU:</b>\n"
+            for quake in report["earthquakes"][:2]:
+                message += f"\n📍 {quake['place']}\n"
+                message += f"   ⚡ {quake['magnitude']}M | 📏 {quake['distance_km']:.0f} km\n"
+        
+        if report["weather"]:
+            message += f"\n<b>🌤️ POGODA:</b>\n"
+            message += f"🌡️ {report['weather']['temperature']:.1f}°C\n"
+            message += f"☁️ {report['weather']['clouds']}% chmur\n"
+            message += f"📊 Ocena: {report['weather']['score']:.1f}/10\n"
+        
+        if report["ai_analysis"]:
+            message += f"\n<b>🧠 ANALIZA AI:</b>\n"
+            message += f"{report['ai_analysis'][:300]}...\n"
+        
+        if report["maps"]:
+            message += f"\n🗺️ <a href='{report['maps'][0]['url']}'>Zobacz mapę lokalizacji</a>"
+        
+        send_message(chat_id, message)
+        
+    except Exception as e:
+        logger.error(f"❌ Błąd pełnego raportu: {e}")
+        send_message(chat_id, f"❌ Błąd generowania raportu: {str(e)}")
+
+# ====================== RUN ======================
+if __name__ == "__main__":
+    print("\n" + "=" * 80)
+    print("🚀 URUCHAMIANIE EARTH OBSERVATION PLATFORM v6.0")
+    print("=" * 80)
+    
+    print(f"✅ Skyfield: gotowy")
+    print(f"✅ USGS: gotowy")
+    print(f"✅ NASA: {'gotowy' if NASA_API_KEY else 'brak klucza'}")
+    print(f"✅ Mapbox: {'gotowy' if MAPBOX_API_KEY else 'brak klucza'}")
+    print(f"✅ DeepSeek: {'gotowy' if DEEPSEEK_API_KEY else 'brak klucza'}")
+    print(f"✅ OpenWeather: {'gotowy' if OPENWEATHER_API_KEY else 'brak klucza'}")
+    print(f"✅ Telegram Bot: gotowy")
+    print("=" * 80)
+    
+    # Uruchom webhook
+    try:
+        # Ustaw webhook
+        webhook_url = f"{RENDER_URL}/webhook"
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/setWebhook", 
+                     json={"url": webhook_url})
+        print(f"🌐 Webhook ustawiony: {webhook_url}")
+    except:
+        print("⚠️ Nie udało się ustawić webhooka (może być już ustawiony)")
+    
+    print("🤖 SYSTEM OBSERWACJI ZIEMI GOTOWY!")
+    print("=" * 80)
+    
+    app.run(host="0.0.0.0", port=PORT, debug=False)
