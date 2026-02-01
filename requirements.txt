@@ -2,6 +2,7 @@ Flask==2.3.3
 requests==2.31.0
 skyfield==1.46
 pytz==2023.3
-numpy==1.24.3
+numpy==1.21.6  # KOMPATYBILNA WERSJA!
 aiohttp==3.9.1
 python-dotenv==1.0.0
+gunicorn==21.2.0
