@@ -38,6 +38,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 USGS_API_KEY = os.getenv("USGS_API_KEY", "")
 RENDER_URL = os.getenv("RENDER_URL", "https://your-app.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
+BOT_USERNAME = "Sentinel_Bot"  # 🔴 POPRAWIONA NAZWA BOTA
 
 # ====================== ENUMS & DATA CLASSES ======================
 
@@ -980,6 +981,7 @@ class AIPoweredTelegramBot:
     
     def __init__(self):
         self.token = TELEGRAM_BOT_TOKEN
+        self.username = BOT_USERNAME  # 🔴 DODANA NAZWA BOTA
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.available = bool(TELEGRAM_BOT_TOKEN)
         
@@ -1006,6 +1008,7 @@ class AIPoweredTelegramBot:
         self.ai_reports_cache = {}
         
         print(f"🤖 AI-Powered Bot zainicjalizowany")
+        print(f"   Bot username: @{self.username}")
         print(f"   DeepSeek AI: {'✅ AKTYWNY' if self.ai_orchestrator.available else '❌ BRAK'}")
     
     async def send_message(self, chat_id: int, text: str, parse_html: bool = True):
@@ -1838,8 +1841,8 @@ def home():
             <p><b>MOJA REKOMENDACJA:</b> Jedź w Tatry na 21:15..."</p>
             
             <div style="text-align: center; margin-top: 30px;">
-                <a href="https://t.me/PcSentinel_Bot" class="telegram-link" target="_blank">
-                    🚀 Rozpocznij z @PcSentinel_Bot
+                <a href="https://t.me/Sentinel_Bot" class="telegram-link" target="_blank">
+                    🚀 Rozpocznij z @Sentinel_Bot
                 </a>
             </div>
         </div>
@@ -1901,8 +1904,21 @@ def set_webhook():
 if __name__ == "__main__":
     print("=" * 80)
     print("🤖 AI-POWERED EARTH OBSERVATORY v8.0")
+    print(f"🤖 Bot username: @{BOT_USERNAME}")
     print("=" * 80)
     
+    # DEBUG INFO
+    print("🔍 DEBUG INFO:")
+    print(f"Bot username: @{BOT_USERNAME}")
+    print(f"TELEGRAM_BOT_TOKEN: {'***' + TELEGRAM_BOT_TOKEN[-6:] if TELEGRAM_BOT_TOKEN else 'BRAK'}")
+    print(f"RENDER_URL: {RENDER_URL}")
+    print(f"PORT: {PORT}")
+    
+    # Sprawdź endpoint webhook
+    webhook_url = f"{RENDER_URL}/webhook"
+    print(f"Webhook URL: {webhook_url}")
+    
+    print("=" * 80)
     print("🚀 REWOLUCJA AI:")
     print("   System NIE pyta co chcesz robić")
     print("   AI analizuje WSZYSTKO i SAM mówi co warto robić")
@@ -1929,7 +1945,7 @@ if __name__ == "__main__":
             )
             
             if response.status_code == 200:
-                print(f"✅ Webhook: {webhook_url}")
+                print(f"✅ Webhook ustawiony: {webhook_url}")
             else:
                 print(f"⚠️ Błąd webhooka: {response.text}")
         except Exception as e:
@@ -1959,5 +1975,5 @@ if __name__ == "__main__":
     print("🤖 SYSTEM AI GOTOWY DO DZIAŁANIA!")
     print("=" * 80)
     
-    # Uruchom Flask
+    # Uruchom Flask bez nieskończonej pętli
     app.run(host="0.0.0.0", port=PORT, debug=False)
