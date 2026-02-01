@@ -1,11 +1,23 @@
 services:
   - type: web
-    name: sentry-one-bot
+    name: telegram-bot
     env: python
-    buildCommand: |
-      pip install --upgrade pip setuptools wheel
-      pip install -r requirements.txt
-    startCommand: python app.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
     envVars:
-      - key: PORT
-        value: 10000
+      - key: TELEGRAM_BOT_API
+        sync: false
+      - key: USGS_API_KEY
+        sync: false
+      - key: NASA_API_KEY
+        sync: false
+      - key: MAPBOX_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: N2YO_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: RENDER_URL
+        sync: false
