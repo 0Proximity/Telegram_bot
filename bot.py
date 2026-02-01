@@ -28,7 +28,7 @@ print("🔐 Wszystkie API ukryte w zmiennych środowiskowych")
 print("=" * 80)
 
 # Pobierz WSZYSTKIE klucze z environment variables
-TOKEN = os.getenv("TELEGRAM_BOT_API","")
+TELEGRAM_BOT_API = os.getenv("TELEGRAM_BOT_API","")
 USGS_API_KEY = os.getenv("USGS_API_KEY", "")  # USGS może nie wymagać klucza
 NASA_API_KEY = os.getenv("NASA_API_KEY", "DEMO_KEY")  # NASA ma darmowy demo
 MAPBOX_API_KEY = os.getenv("MAPBOX_API_KEY")
