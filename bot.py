@@ -38,7 +38,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 USGS_API_KEY = os.getenv("USGS_API_KEY", "")
 RENDER_URL = os.getenv("RENDER_URL", "https://your-app.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
-BOT_USERNAME = "Sentinel_Bot"  # 🔴 POPRAWIONA NAZWA BOTA
+BOT_USERNAME = "PcSentinel_Bot"  # 🔴 POPRAWIONA NAZWA BOTA
 
 # ====================== ENUMS & DATA CLASSES ======================
 
@@ -981,7 +981,7 @@ class AIPoweredTelegramBot:
     
     def __init__(self):
         self.token = TELEGRAM_BOT_TOKEN
-        self.username = BOT_USERNAME  # 🔴 DODANA NAZWA BOTA
+        self.username = BOT_USERNAME  # 🔴 PRAWIDŁOWA NAZWA BOTA
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.available = bool(TELEGRAM_BOT_TOKEN)
         
@@ -1841,8 +1841,8 @@ def home():
             <p><b>MOJA REKOMENDACJA:</b> Jedź w Tatry na 21:15..."</p>
             
             <div style="text-align: center; margin-top: 30px;">
-                <a href="https://t.me/Sentinel_Bot" class="telegram-link" target="_blank">
-                    🚀 Rozpocznij z @Sentinel_Bot
+                <a href="https://t.me/PcSentinel_Bot" class="telegram-link" target="_blank">
+                    🚀 Rozpocznij z @PcSentinel_Bot
                 </a>
             </div>
         </div>
