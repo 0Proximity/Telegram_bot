@@ -14,6 +14,8 @@ import random
 import requests
 import asyncio
 import aiohttp
+import traceback
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any, AsyncGenerator
 from flask import Flask, request, jsonify
@@ -21,7 +23,6 @@ import logging
 from dataclasses import dataclass, asdict
 from enum import Enum
 from collections import defaultdict
-import threading
 
 # ====================== KONFIGURACJA ======================
 print("=" * 80)
@@ -1853,54 +1854,159 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Webhook Telegram - POPRAWIONA WERSJA BEZ async"""
+    """Webhook Telegram - POPRAWIONA WERSJA Z ZABEZPIECZENIAMI"""
     try:
-        data = request.get_json()
+        # DEBUG: Wypisz co otrzymaliśmy
+        logger.info("=" * 50)
+        logger.info("📩 WEBHOOK CALLED")
         
-        if "message" in data:
-            chat_id = data["message"]["chat"]["id"]
-            text = data["message"].get("text", "").strip()
-            
-            # Log dla debugowania
-            logger.info(f"📩 Otrzymano wiadomość: {text[:50]}... od {chat_id}")
-            
-            # Uruchom przetwarzanie w tle
-            def process_message():
+        # Sprawdź czy są dane
+        if not request.data:
+            logger.warning("⚠️ Brak danych w żądaniu")
+            return jsonify({"status": "error", "message": "No data"}), 400
+        
+        # Parsuj JSON
+        try:
+            data = request.get_json()
+        except Exception as json_error:
+            logger.error(f"❌ Błąd parsowania JSON: {json_error}")
+            logger.error(f"❌ Dane: {request.data[:200]}")
+            return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+        
+        # Debug: wypisz otrzymane dane
+        logger.info(f"📊 Otrzymane dane: {json.dumps(data, indent=2)[:500]}...")
+        
+        # ZABEZPIECZENIE 1: Sprawdź czy są poprawne dane
+        if not data or not isinstance(data, dict):
+            logger.warning("⚠️ Brak lub nieprawidłowe dane JSON")
+            return jsonify({"status": "ok", "message": "No valid data"}), 200
+        
+        # ZABEZPIECZENIE 2: Sprawdź czy jest pole 'message' lub 'edited_message'
+        if "message" not in data and "edited_message" not in data:
+            logger.warning("⚠️ Brak pola 'message' lub 'edited_message' w danych")
+            # Może to być update innego typu (np. callback_query)
+            return jsonify({"status": "ok", "message": "No message field"}), 200
+        
+        # Pobierz wiadomość (może być z message lub edited_message)
+        message = data.get("message") or data.get("edited_message")
+        
+        # ZABEZPIECZENIE 3: Sprawdź czy wiadomość jest słownikiem
+        if not message or not isinstance(message, dict):
+            logger.warning("⚠️ Wiadomość nie jest słownikiem")
+            return jsonify({"status": "error", "message": "Invalid message format"}), 400
+        
+        # ZABEZPIECZENIE 4: Sprawdź czy jest chat
+        if "chat" not in message:
+            logger.warning("⚠️ Brak pola 'chat' w wiadomości")
+            return jsonify({"status": "error", "message": "No chat in message"}), 400
+        
+        chat = message.get("chat", {})
+        
+        # ZABEZPIECZENIE 5: Sprawdź chat_id
+        chat_id = chat.get("id")
+        if not chat_id:
+            logger.warning("⚠️ Brak chat_id")
+            return jsonify({"status": "error", "message": "No chat_id"}), 400
+        
+        # ZABEZPIECZENIE 6: Pobierz tekst wiadomości
+        text = message.get("text", "").strip()
+        
+        # Debug informacje
+        logger.info(f"💬 Wiadomość od {chat_id}: '{text[:100]}...'")
+        logger.info(f"👤 Chat: {chat.get('first_name', 'Unknown')} {chat.get('last_name', '')} (@{chat.get('username', 'no_username')})")
+        
+        # ZABEZPIECZENIE 7: Jeśli brak tekstu, może to być inny typ wiadomości
+        if not text:
+            logger.info("ℹ️ Wiadomość bez tekstu (może być zdjęcie, lokalizacja, etc.)")
+            return jsonify({"status": "ok", "message": "No text message"}), 200
+        
+        # Uruchom przetwarzanie w tle
+        def process_message():
+            try:
+                logger.info(f"🔧 Rozpoczynam przetwarzanie wiadomości od {chat_id}")
+                
+                # Stwórz nową pętlę asyncio dla tego wątku
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                if text.startswith('/'):
+                    parts = text.split()
+                    command = parts[0][1:]  # Usuń '/' z początku
+                    args = parts[1:] if len(parts) > 1 else []
+                    
+                    logger.info(f"🛠️ Przetwarzanie komendy: /{command} z argumentami: {args}")
+                    
+                    # Sprawdź czy bot jest dostępny
+                    if not bot.available:
+                        logger.error("❌ Bot nie jest dostępny (brak tokena?)")
+                        # Spróbuj wysłać wiadomość o błędzie
+                        try:
+                            error_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(error_loop)
+                            error_loop.run_until_complete(bot.send_message(
+                                chat_id,
+                                "❌ <b>Bot nie jest skonfigurowany!</b>\n\n"
+                                "Administrator nie ustawił tokena Telegram."
+                            ))
+                            error_loop.close()
+                        except:
+                            pass
+                        return
+                    
+                    # Wykonaj komendę
+                    loop.run_until_complete(bot.handle_command(chat_id, command, args))
+                    logger.info(f"✅ Zakończono przetwarzanie komendy /{command}")
+                    
+                else:
+                    logger.info(f"💬 Przetwarzanie zwykłej wiadomości")
+                    loop.run_until_complete(bot.send_message(
+                        chat_id,
+                        "🤖 <b>AI-Powered Earth Observatory v8.0</b>\n\n"
+                        "Użyj <code>/start [lokalizacja]</code> aby AI od razu przeanalizowało WSZYSTKO!\n\n"
+                        "<b>Przykład:</b> <code>/start warszawa</code>\n\n"
+                        "<b>Albo zapytaj AI:</b> <code>/ai [twoje pytanie]</code>"
+                    ))
+                    logger.info(f"✅ Wysłano odpowiedź na zwykłą wiadomość")
+                
+                loop.close()
+                logger.info(f"🎉 Przetworzono wiadomość od {chat_id}")
+                
+            except Exception as e:
+                logger.error(f"❌ Błąd przetwarzania wiadomości: {e}")
+                logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                
+                # Spróbuj wysłać błąd do użytkownika
                 try:
-                    # Stwórz nową pętlę asyncio dla tego wątku
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    if text.startswith('/'):
-                        parts = text.split()
-                        command = parts[0][1:]
-                        args = parts[1:] if len(parts) > 1 else []
-                        
-                        loop.run_until_complete(bot.handle_command(chat_id, command, args))
-                    else:
-                        loop.run_until_complete(bot.send_message(
-                            chat_id,
-                            "🤖 <b>AI-Powered Earth Observatory v8.0</b>\n\n"
-                            "Użyj <code>/start [lokalizacja]</code> aby AI od razu przeanalizowało WSZYSTKO!\n\n"
-                            "<b>Przykład:</b> <code>/start warszawa</code>\n\n"
-                            "<b>Albo zapytaj AI:</b> <code>/ai [twoje pytanie]</code>"
-                        ))
-                    
-                    loop.close()
-                except Exception as e:
-                    logger.error(f"❌ Błąd przetwarzania wiadomości: {e}")
-            
-            # Uruchom w tle
-            thread = threading.Thread(target=process_message)
-            thread.daemon = True
-            thread.start()
-            
-            return jsonify({"status": "ok", "message": "Processing in background"}), 200
+                    error_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(error_loop)
+                    error_loop.run_until_complete(bot.send_message(
+                        chat_id,
+                        "❌ <b>Błąd systemu!</b>\n\n"
+                        "Przepraszamy, wystąpił błąd podczas przetwarzania.\n"
+                        "Spróbuj ponownie za chwilę.\n\n"
+                        f"<code>Error: {str(e)[:100]}</code>"
+                    ))
+                    error_loop.close()
+                except Exception as send_error:
+                    logger.error(f"❌ Nie udało się wysłać błędu do użytkownika: {send_error}")
         
-        return jsonify({"status": "ok", "message": "No message to process"}), 200
+        # Uruchom w tle
+        thread = threading.Thread(target=process_message, name=f"TelegramMsg-{chat_id}")
+        thread.daemon = True
+        thread.start()
+        
+        logger.info(f"🚀 Uruchomiono wątek przetwarzania dla chat_id: {chat_id}")
+        
+        return jsonify({
+            "status": "ok", 
+            "message": "Processing in background",
+            "chat_id": chat_id,
+            "text": text[:100]
+        }), 200
         
     except Exception as e:
         logger.error(f"❌ Webhook error: {e}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/set_webhook', methods=['GET'])
@@ -1911,16 +2017,51 @@ def set_webhook():
     
     try:
         webhook_url = f"{RENDER_URL}/webhook"
+        logger.info(f"🔗 Próbuję ustawić webhook: {webhook_url}")
+        
         response = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
-            json={"url": webhook_url}
+            json={"url": webhook_url},
+            timeout=10
         )
         
-        return jsonify({
-            "status": "success" if response.status_code == 200 else "error",
-            "webhook_url": webhook_url,
-            "response": response.json() if response.status_code == 200 else response.text
-        })
+        logger.info(f"📡 Odpowiedź Telegram API: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"✅ Webhook ustawiony: {result}")
+            return jsonify({
+                "status": "success",
+                "webhook_url": webhook_url,
+                "response": result
+            })
+        else:
+            logger.error(f"❌ Błąd webhooka: {response.text}")
+            return jsonify({
+                "status": "error",
+                "webhook_url": webhook_url,
+                "response": response.text
+            })
+    except Exception as e:
+        logger.error(f"❌ Błąd ustawiania webhooka: {e}")
+        return jsonify({"status": "error", "error": str(e)})
+
+@app.route('/get_webhook_info', methods=['GET'])
+def get_webhook_info():
+    """Pobierz informacje o webhooku"""
+    if not TELEGRAM_BOT_TOKEN:
+        return jsonify({"status": "error", "message": "Brak tokena"}), 400
+    
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getWebhookInfo",
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({"status": "error", "response": response.text})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
@@ -1962,6 +2103,8 @@ if __name__ == "__main__":
     if TELEGRAM_BOT_TOKEN:
         try:
             webhook_url = f"{RENDER_URL}/webhook"
+            print(f"🔗 Próbuję ustawić webhook automatycznie...")
+            
             response = requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
                 json={"url": webhook_url},
@@ -1971,11 +2114,14 @@ if __name__ == "__main__":
             if response.status_code == 200:
                 print(f"✅ Webhook ustawiony: {webhook_url}")
             else:
-                print(f"⚠️ Błąd webhooka: {response.text}")
+                print(f"⚠️ Błąd webhooka: {response.text[:100]}")
+                print(f"ℹ️ Możesz ręcznie ustawić webhook przez: {RENDER_URL}/set_webhook")
         except Exception as e:
             print(f"⚠️ Błąd ustawiania webhooka: {e}")
+            print(f"ℹ️ Ustaw ręcznie: {RENDER_URL}/set_webhook")
     else:
         print("❌ BRAK TELEGRAM TOKEN - bot nie będzie działać")
+        print("ℹ️ Ustaw zmienną środowiskową TELEGRAM_BOT_TOKEN")
     
     print("\n🎯 GŁÓWNA INNOWACJA:")
     print("   /start [lokalizacja] = AI od razu daje pełny raport!")
@@ -1996,8 +2142,13 @@ if __name__ == "__main__":
     print("   /ai Kiedy najlepszy czas na obserwacje?")
     print("   /analyze warunki do fotografii satelitarnej")
     print("=" * 80)
+    print("🌐 Aplikacja dostępna pod adresem:")
+    print(f"   {RENDER_URL}")
+    print("🤖 Bot dostępny pod:")
+    print(f"   https://t.me/{BOT_USERNAME}")
+    print("=" * 80)
     print("🤖 SYSTEM AI GOTOWY DO DZIAŁANIA!")
     print("=" * 80)
     
-    # Uruchom Flask bez nieskończonej pętli
+    # Uruchom Flask
     app.run(host="0.0.0.0", port=PORT, debug=False)
