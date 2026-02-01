@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass, asdict
 from enum import Enum
 from collections import defaultdict
+import threading
 
 # ====================== KONFIGURACJA ======================
 print("=" * 80)
@@ -38,7 +39,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 USGS_API_KEY = os.getenv("USGS_API_KEY", "")
 RENDER_URL = os.getenv("RENDER_URL", "https://your-app.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
-BOT_USERNAME = "PcSentinel_Bot"  # 🔴 POPRAWIONA NAZWA BOTA
+BOT_USERNAME = "PcSentinel_Bot"  # 🔴 PRAWIDŁOWA NAZWA BOTA
 
 # ====================== ENUMS & DATA CLASSES ======================
 
@@ -1851,8 +1852,8 @@ def home():
     '''
 
 @app.route('/webhook', methods=['POST'])
-async def webhook():
-    """Webhook Telegram z async"""
+def webhook():
+    """Webhook Telegram - POPRAWIONA WERSJA BEZ async"""
     try:
         data = request.get_json()
         
@@ -1860,21 +1861,44 @@ async def webhook():
             chat_id = data["message"]["chat"]["id"]
             text = data["message"].get("text", "").strip()
             
-            if text.startswith('/'):
-                parts = text.split()
-                command = parts[0][1:]
-                args = parts[1:] if len(parts) > 1 else []
-                
-                await bot.handle_command(chat_id, command, args)
-            else:
-                await bot.send_message(chat_id,
-                    "🤖 <b>AI-Powered Earth Observatory v8.0</b>\n\n"
-                    "Użyj <code>/start [lokalizacja]</code> aby AI od razu przeanalizowało WSZYSTKO!\n\n"
-                    "<b>Przykład:</b> <code>/start warszawa</code>\n\n"
-                    "<b>Albo zapytaj AI:</b> <code>/ai [twoje pytanie]</code>"
-                )
+            # Log dla debugowania
+            logger.info(f"📩 Otrzymano wiadomość: {text[:50]}... od {chat_id}")
+            
+            # Uruchom przetwarzanie w tle
+            def process_message():
+                try:
+                    # Stwórz nową pętlę asyncio dla tego wątku
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    if text.startswith('/'):
+                        parts = text.split()
+                        command = parts[0][1:]
+                        args = parts[1:] if len(parts) > 1 else []
+                        
+                        loop.run_until_complete(bot.handle_command(chat_id, command, args))
+                    else:
+                        loop.run_until_complete(bot.send_message(
+                            chat_id,
+                            "🤖 <b>AI-Powered Earth Observatory v8.0</b>\n\n"
+                            "Użyj <code>/start [lokalizacja]</code> aby AI od razu przeanalizowało WSZYSTKO!\n\n"
+                            "<b>Przykład:</b> <code>/start warszawa</code>\n\n"
+                            "<b>Albo zapytaj AI:</b> <code>/ai [twoje pytanie]</code>"
+                        ))
+                    
+                    loop.close()
+                except Exception as e:
+                    logger.error(f"❌ Błąd przetwarzania wiadomości: {e}")
+            
+            # Uruchom w tle
+            thread = threading.Thread(target=process_message)
+            thread.daemon = True
+            thread.start()
+            
+            return jsonify({"status": "ok", "message": "Processing in background"}), 200
         
-        return jsonify({"status": "ok"}), 200
+        return jsonify({"status": "ok", "message": "No message to process"}), 200
+        
     except Exception as e:
         logger.error(f"❌ Webhook error: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
