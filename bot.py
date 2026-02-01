@@ -1959,19 +1959,5 @@ if __name__ == "__main__":
     print("🤖 SYSTEM AI GOTOWY DO DZIAŁANIA!")
     print("=" * 80)
     
-    # Uruchom Flask z obsługą async
-    from threading import Thread
-    import asyncio
-    
-    def run_flask():
-        app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
-    
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    # Główna pętla
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n👋 Zamykanie systemu...")
+    # Uruchom Flask
+    app.run(host="0.0.0.0", port=PORT, debug=False)
